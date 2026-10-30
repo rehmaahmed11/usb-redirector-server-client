@@ -1,9 +1,13 @@
 name: build
 
 # Runs on every merge to main and on every pull request.
+#
 # Produces: MiniUsbBridge.exe, mubb-relay.exe, the Inno Setup installer and a
-# tool chain report for each job (uploaded as artifacts, and mirrored into the
-# run summary so a red build explains itself).
+# tool chain report for the run. The report answers "what happened": every stage,
+# its command, its exit code, its duration, the tool versions involved, the tail
+# of the failing log and the SHA-256 of each artifact. It is uploaded as an
+# artifact, mirrored into the run summary, and posted as a PR comment so it is
+# readable without the Actions log viewer.
 
 on:
   push:
@@ -14,6 +18,8 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
+  checks: write
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +46,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Publish tool chain report (Linux)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-linux -->" -Title "Tool chain report - Linux (core, relay, installer sources)"
+
   windows:
     name: Windows build + installer
     runs-on: windows-latest
@@ -51,8 +63,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Syntax check the CI scripts
+        # If a CI script has a parse error, say so in a file the reporter can
+        # read, instead of failing with a bare "exit code 1".
+        run: |
+          New-Item -ItemType Directory -Force dist/ci | Out-Null
+          $problems = @()
+          foreach ($f in @("ci/windows-build.ps1", "ci/publish-report.ps1")) {
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$parseErrors)
+            if ($parseErrors) {
+              foreach ($e in $parseErrors) { $problems += "$f`:$($e.Extent.StartLineNumber): $($e.Message)" }
+            }
+          }
+          if ($problems.Count -gt 0) {
+            $problems | Set-Content dist/ci/00-syntax.txt
+            $problems | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+          "no syntax errors in ci/windows-build.ps1 or ci/publish-report.ps1" | Set-Content dist/ci/00-syntax.txt
+
       - name: Build, test, compile installer, write tool chain report
-        # The script writes dist/ci/toolchain-report.md even when a stage fails.
+        # The script writes dist/ci/toolchain-report.md from a finally block, so
+        # the report exists even when a stage fails.
         run: ./ci/windows-build.ps1
 
       - name: Upload tool chain report (Windows)
@@ -77,6 +110,12 @@ jobs:
             dist/ci/toolchain-report.md
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Publish tool chain report (Windows)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-windows -->" -Title "Tool chain report - Windows (MSVC build, tests, Inno Setup installer)"
 
       - name: Job summary
         if: always()
