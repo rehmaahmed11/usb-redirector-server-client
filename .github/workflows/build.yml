@@ -1,0 +1,88 @@
+name: build
+
+# Runs on every merge to main and on every pull request.
+# Produces: MiniUsbBridge.exe, mubb-relay.exe, the Inno Setup installer and a
+# tool chain report for each job (uploaded as artifacts, and mirrored into the
+# run summary so a red build explains itself).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core + relay + installer lint (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Portable core, relay and installer-source checks
+        run: bash ci/linux-check.sh
+
+      - name: Upload tool chain report (Linux)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-report-linux
+          path: dist/ci/
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows:
+    name: Windows build + installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build, test, compile installer, write tool chain report
+        # The script writes dist/ci/toolchain-report.md even when a stage fails.
+        run: ./ci/windows-build.ps1
+
+      - name: Upload tool chain report (Windows)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-report-windows
+          path: dist/ci/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload app and installer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiniUsbBridge-windows-x64
+          path: |
+            dist/app/MiniUsbBridge.exe
+            dist/app/mubb-relay.exe
+            dist/MiniUsbBridge-*-setup.exe
+            dist/ci/SHA256SUMS.txt
+            dist/ci/toolchain-report.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          if (Test-Path dist/ci/toolchain-report.md) {
+            Get-Content dist/ci/toolchain-report.md | Add-Content $env:GITHUB_STEP_SUMMARY
+          } else {
+            "No tool chain report was produced - the build script failed before it could write one." | Add-Content $env:GITHUB_STEP_SUMMARY
+          }

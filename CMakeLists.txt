@@ -76,10 +76,10 @@ add_executable(MiniUsbBridge WIN32 ${MUB_APP_SOURCES})
 target_link_libraries(MiniUsbBridge PRIVATE mub_core
   ws2_32 secur32 crypt32 bcrypt setupapi cfgmgr32 comctl32 shell32 ole32 advapi32 gdi32 user32 uuid
 )
-set_target_properties(MiniUsbBridge PROPERTIES
-  OUTPUT_NAME "MiniUsbBridge"
-  LINK_FLAGS "/MANIFEST:EMBED /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/ui/app.manifest"
-)
+set_target_properties(MiniUsbBridge PROPERTIES OUTPUT_NAME "MiniUsbBridge")
+# The manifest (comctl32 v6 + DPI awareness) travels as a resource. Attaching it
+# through the sources list lets the MSVC toolchain embed it once; adding
+# /MANIFESTINPUT on top of that makes mt.exe see the same manifest twice.
 if(MSVC)
   target_sources(MiniUsbBridge PRIVATE src/ui/app.manifest)
 endif()
@@ -101,4 +101,5 @@ if(MUB_BUILD_TESTS)
 endif()
 
 install(TARGETS MiniUsbBridge mubb-relay RUNTIME DESTINATION .)
-install(FILES appconfig.example.ini docs/QUICKSTART.md docs/TROUBLESHOOTING.md DESTINATION .)
+install(FILES appconfig.example.ini docs/QUICKSTART.md docs/TROUBLESHOOTING.md docs/NETWORKING.md
+        DESTINATION .)

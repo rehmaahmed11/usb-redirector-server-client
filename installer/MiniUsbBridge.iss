@@ -60,6 +60,7 @@ Name: "installrelay"; Description: "Also install the relay helper (only if you h
 Source: "..\dist\app\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\app\mubb-relay.exe"; DestDir: "{app}"; Flags: ignoreversion; Tasks: installrelay
 Source: "..\docs\QUICKSTART.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\docs\NETWORKING.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\TROUBLESHOOTING.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\ARCHITECTURE.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\RELAY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
@@ -75,6 +76,7 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{group}\{#AppName} (Server mode)"; Filename: "{app}\{#AppExe}"; Parameters: "--mode server"
 Name: "{group}\{#AppName} (Client mode)"; Filename: "{app}\{#AppExe}"; Parameters: "--mode client"
 Name: "{group}\Quick start guide"; Filename: "{app}\docs\QUICKSTART.md"
+Name: "{group}\Reaching the other PC (no server needed)"; Filename: "{app}\docs\NETWORKING.md"
 Name: "{group}\Troubleshooting"; Filename: "{app}\docs\TROUBLESHOOTING.md"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Parameters: "{code:GetLaunchParams}"; Tasks: desktopicon
