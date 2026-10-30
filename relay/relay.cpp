@@ -148,9 +148,16 @@ std::string IpOf(SOCKET s) {
     sockaddr_in addr{};
     socklen_t len = sizeof(addr);
     if (getpeername(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return "?";
+#if defined(_WIN32) && defined(_WIN32_WINNT) && (_WIN32_WINNT < 0x0600)
+    // Windows XP has no inet_ntop; inet_ntoa is good enough for a log line.
+    const char* text = inet_ntoa(addr.sin_addr);
+    return text ? text : "?";
+#else
     char buf[64] = {};
+    // xp-ok: only compiled for Vista and later (the #if above excludes XP)
     inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf));
     return buf;
+#endif
 }
 
 void CleanupExpired() {

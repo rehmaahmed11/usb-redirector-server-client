@@ -6,10 +6,12 @@
 #include <cstdio>
 
 #include "../core/logger.h"
+#include "../core/os_support.h"
 #include "../core/settings.h"
 #include "../core/strings.h"
 #include "../win/net.h"
 #include "../win/process.h"
+#include "../win/wincompat.h"
 
 namespace mub {
 namespace {
@@ -127,10 +129,14 @@ UsbipdInfo UsbipdCli::Probe(bool forceRefresh) {
     UsbipdInfo info;
     info.path = ResolvePath();
     info.installed = !info.path.empty();
+    info.osSupported = OsCaps().serverBackend;
     probedAt_ = now;
 
     if (!info.installed) {
-        info.detail = "usbipd.exe was not found. Install usbipd-win (server backend) to share USB devices.";
+        // Only promise "install it" when this Windows version could actually run it.
+        info.detail = info.osSupported
+                          ? "usbip.exe was not found. Install usbipd-win (server backend) to share USB devices."
+                          : "usbipd-win cannot run on this Windows version: " + OsCaps().serverNote;
         cached_ = info;
         return info;
     }
@@ -144,7 +150,9 @@ UsbipdInfo UsbipdCli::Probe(bool forceRefresh) {
     info.serviceRunning = svcText.find("RUNNING") != std::string::npos;
 
     info.loopbackReachable = PingLoopback(700);
-    if (info.serviceRunning && info.loopbackReachable) {
+    if (!info.osSupported) {
+        info.detail = "usbipd.exe is installed but this Windows version cannot run it: " + OsCaps().serverNote;
+    } else if (info.serviceRunning && info.loopbackReachable) {
         info.detail = "usbipd service is running on 127.0.0.1:3240";
     } else if (info.serviceRunning) {
         info.detail = "usbipd service is running but the local endpoint is not answering yet";

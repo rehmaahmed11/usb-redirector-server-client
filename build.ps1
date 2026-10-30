@@ -1,13 +1,21 @@
 # Mini USB Bridge - Windows build script
 # Usage (from a normal PowerShell prompt, no admin needed):
-#   .\build.ps1                 # build Release, run tests, collect dist\app
-#   .\build.ps1 -Installer      # additionally build the Inno Setup installer
+#   .\build.ps1                      # normal build for Windows 10/11, run tests, collect dist\app
+#   .\build.ps1 -MinWin vista        # binary that also runs on Vista/7/8/8.1 -> dist\app-legacy
+#   .\build.ps1 -MinWin xp           # binary for Windows XP SP3 (needs the v141_xp toolset)
+#   .\build.ps1 -Installer           # additionally build the Inno Setup installer
 #   .\build.ps1 -Clean
 # SPDX-License-Identifier: MIT
 param(
     [switch]$Clean,
     [switch]$Installer,
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [ValidateSet("win10", "vista", "xp")]
+    [string]$MinWin = "win10",
+    [ValidateSet("auto", "x86", "x64")]
+    [string]$Platform = "auto",
+    [string]$Toolset = "",
+    [string]$Generator = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,77 +36,189 @@ function Find-CMake {
     throw "CMake was not found. Install CMake 3.20+ or run this script from a Visual Studio Developer PowerShell."
 }
 
+# Target defaults: a Windows XP build is 32-bit unless asked otherwise, and the
+# XP toolset is required (Visual Studio 2022 does not ship it).
+if ($Platform -eq "auto") { $Platform = if ($MinWin -eq "xp") { "x86" } else { "x64" } }
+if (-not $Toolset -and $MinWin -eq "xp") { $Toolset = "v141_xp" }
+
+$isLegacy = $MinWin -ne "win10"
+$buildDir = if ($isLegacy) { "$root\build-$MinWin" } else { "$root\build" }
+$appDir = if ($isLegacy) { "$root\dist\app-legacy" } else { "$root\dist\app" }
+$issFile = switch ($MinWin) {
+    "xp" { "$root\installer\MiniUsbBridgeXp.iss" }
+    "vista" { "$root\installer\MiniUsbBridgeLegacy.iss" }
+    default { "$root\installer\MiniUsbBridge.iss" }
+}
+
 $cmake = Find-CMake
 Write-Host "CMake: $cmake" -ForegroundColor Cyan
+Write-Host "Minimum Windows: $MinWin   platform: $Platform   toolset: $(if ($Toolset) { $Toolset } else { 'default' })" -ForegroundColor Cyan
 
 if ($Clean) {
-    Remove-Item -Recurse -Force "$root\build", "$root\dist" -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$root\build", "$root\build-vista", "$root\build-xp", "$root\dist" -ErrorAction SilentlyContinue
     Write-Host "Cleaned build and dist." -ForegroundColor Yellow
     return
 }
 
-# Configure (Visual Studio generator picks up the installed MSVC toolset).
-if (-not (Test-Path "$root\build\CMakeCache.txt")) {
-    & $cmake -S $root -B "$root\build" -G "Visual Studio 17 2022" -A x64
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Visual Studio generator unavailable, falling back to the default generator..." -ForegroundColor Yellow
-        & $cmake -S $root -B "$root\build" -A x64
-        if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+# Configure.
+#
+# The generator name is deliberately NOT pinned: the Windows runners already use
+# a newer Visual Studio than any hardcoded "-G Visual Studio 17 2022" (CMake
+# then fails with "could not find any instance of Visual Studio"), and a user may
+# only have Ninja. So: try the default generator with an explicit architecture,
+# then the default without it, then Ninja - each time with a clean build
+# directory, because a failed configure leaves a cache that pins the generator.
+function Invoke-Configure {
+    param([string]$Gen, [string]$Arch, [string]$ExtraToolset)
+    $cfgArgs = @("-S", $root, "-B", $buildDir, "-DMUB_MIN_WIN=$MinWin")
+    if ($Gen) { $cfgArgs += @("-G", $Gen) }
+    if ($Arch) { $cfgArgs += @("-A", $Arch) }
+    if ($ExtraToolset) { $cfgArgs += @("-T", $ExtraToolset) }
+    Remove-Item -Recurse -Force $buildDir -ErrorAction SilentlyContinue
+    Write-Host ("cmake " + ($cfgArgs -join " ")) -ForegroundColor DarkGray
+    # Out-Host keeps cmake's own output visible without mixing it into the
+    # function's return value (which must be the exit code only).
+    & $cmake @cfgArgs 2>&1 | Out-Host
+    return $LASTEXITCODE
+}
+
+if (-not (Test-Path "$buildDir\CMakeCache.txt")) {
+    $attempts = @()
+    if ($Generator) {
+        $attempts += @{ Gen = $Generator; Arch = $Platform }
+    } else {
+        $attempts += @{ Gen = ""; Arch = $Platform }   # default generator (newest VS on the machine)
+        $attempts += @{ Gen = ""; Arch = "" }          # single-config generators reject -A
+        $attempts += @{ Gen = "Ninja"; Arch = "" }     # no Visual Studio at all
+    }
+
+    $configured = $false
+    foreach ($attempt in $attempts) {
+        $code = Invoke-Configure -Gen $attempt.Gen -Arch $attempt.Arch -ExtraToolset $Toolset
+        if ($code -eq 0) { $configured = $true; break }
+        Write-Host ("configure with generator '" + $(if ($attempt.Gen) { $attempt.Gen } else { "default" }) +
+                    "' failed - trying the next option...") -ForegroundColor Yellow
+    }
+
+    if (-not $configured) {
+        if ($MinWin -eq "xp") {
+            throw @"
+The Windows XP build needs the XP toolset, which current Visual Studio versions do not ship.
+  * Install Visual Studio 2017 or 2019 with the component
+    "C++ Windows XP Support for VS 2017 (v141) tools".
+  * Run:  .\build.ps1 -MinWin xp -Toolset v141_xp
+  * Or cross compile with MinGW-w64 i686 (see docs/COMPATIBILITY.md).
+  * A MinGW user can also run:  cmake -S . -B build-xp -DMUB_MIN_WIN=xp
+"@
+        }
+        throw "CMake configure failed: no working generator (see the messages above)"
     }
 }
 
-& $cmake --build "$root\build" --config $Configuration --parallel
+& $cmake --build $buildDir --config $Configuration --parallel
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
-# Unit tests (portable core: crypto, pairing, protocol, USB/IP header checks)
-$testExe = Get-ChildItem "$root\build" -Recurse -Filter test_core.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+# Unit tests (portable core: crypto, pairing, protocol, USB/IP header checks, OS support matrix)
+$testExe = Get-ChildItem $buildDir -Recurse -Filter test_core.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($testExe) {
     Write-Host "Running core tests..." -ForegroundColor Cyan
     & $testExe.FullName
     if ($LASTEXITCODE -ne 0) { throw "Core tests failed" }
 }
 
-# Collect artifacts in the layout the Inno Setup script expects.
-$appDir = "$root\dist\app"
+# Collect artifacts in the layout the Inno Setup scripts expect.
 New-Item -ItemType Directory -Force -Path $appDir | Out-Null
-$exe = Get-ChildItem "$root\build" -Recurse -Filter MiniUsbBridge.exe -ErrorAction SilentlyContinue |
+$exe = Get-ChildItem $buildDir -Recurse -Filter MiniUsbBridge.exe -ErrorAction SilentlyContinue |
        Where-Object { $_.FullName -notmatch 'CMakeFiles' } | Select-Object -First 1
-$relay = Get-ChildItem "$root\build" -Recurse -Filter mubb-relay.exe -ErrorAction SilentlyContinue |
+$relay = Get-ChildItem $buildDir -Recurse -Filter mubb-relay.exe -ErrorAction SilentlyContinue |
          Where-Object { $_.FullName -notmatch 'CMakeFiles' } | Select-Object -First 1
 if (-not $exe) { throw "MiniUsbBridge.exe was not produced" }
 Copy-Item $exe.FullName "$appDir\MiniUsbBridge.exe" -Force
-if ($relay) { Copy-Item $relay.FullName "$appDir\mubb-relay.exe" -Force }
+if ($relay) { Copy-Item $relay.FullName "$appDir\mubb-relay.exe" -Force } else { Remove-Item "$appDir\mubb-relay.exe" -ErrorAction SilentlyContinue }
 
 $size = [math]::Round((Get-Item "$appDir\MiniUsbBridge.exe").Length / 1MB, 2)
 Write-Host "Built: $appDir\MiniUsbBridge.exe ($size MB)" -ForegroundColor Green
 
-if ($Installer) {
-    # Fetch bundled backends so the installer is fully offline (no download at install time)
-    $fetchPs1 = "$root\\ci\\fetch-backends.ps1"
-    if (Test-Path $fetchPs1) {
-        Write-Host "Fetching bundled backends (offline installer)..." -ForegroundColor Cyan
-        try {
-            & pwsh -NoProfile -File $fetchPs1
-            if ($LASTEXITCODE -ne 0) { Write-Host "Backend fetch returned $LASTEXITCODE - installer will still build but may show download links" -ForegroundColor Yellow }
-        } catch {
-            Write-Host "Backend fetch failed: $($_.Exception.Message) - installer will still build" -ForegroundColor Yellow
+# For a legacy target, prove the binary really does not import post-XP APIs:
+# the PE subsystem version must be 5.01 for XP and the import table may not
+# reference the UCRT or any Vista+ function (ci/check_legacy_compat.py --exe).
+if ($isLegacy) {
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
+    if ($py) {
+        $peTarget = if ($MinWin -eq "xp") { "xp" } else { "win10" }
+        Write-Host "Checking the $MinWin binary against the $peTarget import rules..." -ForegroundColor Cyan
+        & $py.Source "$root\ci\check_legacy_compat.py" --exe "$appDir\MiniUsbBridge.exe" --target $peTarget
+        if ($LASTEXITCODE -ne 0) {
+            if ($MinWin -eq "xp") {
+                Write-Host "The binary still imports APIs that Windows XP does not have." -ForegroundColor Red
+                Write-Host "An 'xp' build must use the static CRT and the v141_xp toolset; see docs/COMPATIBILITY.md." -ForegroundColor Yellow
+                throw "Windows XP compatibility check failed"
+            }
+            Write-Host "Informational for a Vista target: see the imports listed above (docs/COMPATIBILITY.md)." -ForegroundColor Yellow
         }
     } else {
-        $fetchPy = "$root\\ci\\fetch-backends.py"
-        if (Test-Path $fetchPy) {
-            Write-Host "Fetching bundled backends via python..." -ForegroundColor Cyan
-            try { & python $fetchPy } catch { Write-Host "Python fetch failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+        Write-Host "python not found - skipping the PE compatibility check" -ForegroundColor Yellow
+    }
+}
+
+if ($Installer) {
+    # Fetch bundled backends so the *default* installer is fully offline. The
+    # legacy installers never bundle backends (those Windows versions cannot run them).
+    if (-not $isLegacy) {
+        $fetchPs1 = "$root\ci\fetch-backends.ps1"
+        if (Test-Path $fetchPs1) {
+            Write-Host "Fetching bundled backends (offline installer)..." -ForegroundColor Cyan
+            try {
+                & pwsh -NoProfile -File $fetchPs1
+                if ($LASTEXITCODE -ne 0) { Write-Host "Backend fetch returned $LASTEXITCODE - installer will still build but may show download links" -ForegroundColor Yellow }
+            } catch {
+                Write-Host "Backend fetch failed: $($_.Exception.Message) - installer will still build" -ForegroundColor Yellow
+            }
+        } else {
+            $fetchPy = "$root\ci\fetch-backends.py"
+            if (Test-Path $fetchPy) {
+                Write-Host "Fetching bundled backends via python..." -ForegroundColor Cyan
+                try { & python $fetchPy } catch { Write-Host "Python fetch failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+            }
         }
     }
 
-    $iscc = @(
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    # Inno Setup 6 builds the Windows 10 and the legacy (7+) installer; Windows XP
+    # needs Inno Setup 5.6.1, which only that script understands.
+    $version = if ($MinWin -eq "xp") { 5 } else { 6 }
+    $iscc = $null
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+        if (-not $base) { continue }
+        foreach ($sub in @("Inno Setup $version\ISCC.exe", "Programs\Inno Setup $version\ISCC.exe")) {
+            $candidate = Join-Path $base $sub
+            if (-not $iscc -and (Test-Path $candidate)) { $iscc = $candidate }
+        }
+    }
     if (-not $iscc) {
+        $onPath = Get-Command iscc.exe -ErrorAction SilentlyContinue
+        if ($onPath) { $iscc = $onPath.Source }
+    }
+    if (-not $iscc -and $version -eq 6) {
+        # Same fallback the CI script uses on the Windows runner.
+        $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+        if ($choco) {
+            Write-Host "ISCC.exe not found - installing Inno Setup with Chocolatey..." -ForegroundColor Yellow
+            & $choco.Source install innosetup -y --no-progress --limit-output
+            foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+                if (-not $base) { continue }
+                $candidate = Join-Path $base "Inno Setup 6\ISCC.exe"
+                if (-not $iscc -and (Test-Path $candidate)) { $iscc = $candidate }
+            }
+        }
+    }
+    if (-not $iscc) {
+        if ($MinWin -eq "xp") {
+            throw "Inno Setup 5.6.1 was not found (https://jrsoftware.org/download.php/is.exe is 6.x; use the 5.6.1 release from jrsoftware.org/files/old/). Inno Setup 6 cannot produce a Windows XP setup."
+        }
         throw "Inno Setup 6 was not found. Install it from https://jrsoftware.org/isdl.php (or: winget install JRSoftware.InnoSetup)"
     }
-    & $iscc "$root\installer\MiniUsbBridge.iss"
+    & $iscc $issFile
     if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
     Get-ChildItem "$root\dist\MiniUsbBridge-*-setup.exe" | ForEach-Object {
         $mb = [math]::Round($_.Length / 1MB, 2)
@@ -108,6 +228,12 @@ if ($Installer) {
 
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  Installer is fully offline: backends are already inside (no extra download needed)"
-Write-Host "  1. Run dist\MiniUsbBridge-*-setup.exe on both PCs (choose Server / Client / Both)"
-Write-Host "  2. Or run dist\app\MiniUsbBridge.exe directly"
+if ($isLegacy) {
+    Write-Host "  Legacy build ($MinWin): the app, pairing, tunnel and relay work; USB backends do not"
+    Write-Host "  (they need Windows 10 1809/1903 x64). See docs\COMPATIBILITY.md."
+    Write-Host "  Installer: .\build.ps1 -MinWin $MinWin -Installer"
+} else {
+    Write-Host "  Installer is fully offline: backends are already inside (no extra download needed)"
+    Write-Host "  1. Run dist\MiniUsbBridge-*-setup.exe on both PCs (choose Server / Client / Both)"
+    Write-Host "  2. Or run dist\app\MiniUsbBridge.exe directly"
+}

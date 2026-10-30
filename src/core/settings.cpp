@@ -63,6 +63,7 @@ void Settings::SyncRaw() const {
     raw["singleUseCode"] = singleUseCode ? "1" : "0";
     raw["autoShareAll"] = autoShareAll ? "1" : "0";
     raw["autoReshareOnReenumerate"] = autoReshareOnReenumerate ? "1" : "0";
+    raw["allowLegacyTls"] = allowLegacyTls ? "1" : "0";
     raw["publicHost"] = publicHost;
     raw["relayHost"] = relayHost;
     raw["relayPort"] = std::to_string(relayPort);
@@ -100,6 +101,7 @@ void Settings::ApplyRaw() {
     singleUseCode = flag("singleUseCode", singleUseCode);
     autoShareAll = flag("autoShareAll", autoShareAll);
     autoReshareOnReenumerate = flag("autoReshareOnReenumerate", autoReshareOnReenumerate);
+    allowLegacyTls = flag("allowLegacyTls", allowLegacyTls);
     publicHost = Trim(str("publicHost", publicHost));
     relayHost = Trim(str("relayHost", relayHost));
     relayPort = static_cast<uint16_t>(num("relayPort", relayPort, 1, 65535));

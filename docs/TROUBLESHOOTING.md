@@ -5,6 +5,30 @@ app always comes from the backend or from a specific check in this code — noth
 
 ## Backends
 
+### "usbipd-win not usable on Windows 7, build 6.1.7601, x64" / "no client driver can run on ..."
+
+The Windows version itself is the limit, not a missing install:
+
+| Backend | Needs | What you can still do |
+|---|---|---|
+| usbipd-win (SERVER) | Windows 10 1809 x64/ARM64, Windows Server 2019+ | nothing on the device PC, unless you install a legacy `usbipd` yourself |
+| usbip-win2 (CLIENT) | Windows 10 1903 x64 / Windows 11 ARM64 | only a legacy test-signed VHCI driver (for example cezanne/usbip-win v0.1.0); the app detects it, moves the tunnel to 3240 and labels it correctly |
+
+The app logs the reason at start (`os Detected ...` / `Server backend (usbipd-win): NOT supported ...`) and
+shows it in the banner. See [COMPATIBILITY.md](COMPATIBILITY.md) for every Windows version.
+
+### "This session uses TLS 1.0 because one side runs a legacy Windows version"
+
+An XP/Vista peer can only speak TLS 1.0. The log line `tls ... negotiated TLS 1.0` appears next to it.
+Upgrade that PC, or put it behind a modern proxy. If you want to refuse old peers outright, untick
+*Settings → Accept TLS 1.0/1.1 for old Windows peers* (`allowLegacyTls=0`).
+
+### The app will not start on Windows XP ("not a valid Win32 application")
+
+The binary was built for Windows 10. Windows XP needs a build made with `-MinWin xp`
+(`build.ps1 -MinWin xp`, toolset `v141_xp`) so the PE subsystem version is 5.01 — see
+[COMPATIBILITY.md](COMPATIBILITY.md#building-per-target).
+
 ### "Server backend missing: install usbipd-win"
 * Install [usbipd-win](https://github.com/dorssel/usbipd-win/releases) (`winget install usbipd`).
 * Verify: `where usbipd` and `sc query usbipd` (state must be `RUNNING`).

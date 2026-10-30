@@ -6,6 +6,7 @@
 #include <windows.h>
 #endif
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <mutex>

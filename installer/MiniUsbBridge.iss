@@ -73,6 +73,7 @@ Name: "install_usbip"; Description: "Install usbip-win2 driver (client backend) 
 [Files]
 Source: "..\dist\app\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\app\mubb-relay.exe"; DestDir: "{app}"; Flags: ignoreversion; Tasks: installrelay
+Source: "..\docs\COMPATIBILITY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\QUICKSTART.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\NETWORKING.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\docs\TROUBLESHOOTING.md"; DestDir: "{app}\docs"; Flags: ignoreversion

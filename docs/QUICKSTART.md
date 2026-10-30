@@ -6,7 +6,14 @@ is the easiest, a free TCP tunnel the most locked-down-friendly).
 
 ## 0. Install the pieces
 
+Check what your Windows versions can do first — the full matrix is in
+[COMPATIBILITY.md](COMPATIBILITY.md). Short version: the app runs from Windows XP SP3 up, but the two
+backends (and therefore USB redirection) need Windows 10 1809 (server) and Windows 10 1903 (client driver).
+
 Just run the single offline installer on **both PCs**: `MiniUsbBridge-1.0.0-setup.exe`
+(Windows 10 1809+). On Windows 7 SP1 - 8.1 use `MiniUsbBridge-1.0.0-legacy-setup.exe`, on Windows XP
+`MiniUsbBridge-1.0.0-xp-setup.exe`; both install the app and docs only, because no backend can run on
+those Windows versions.
 
 The installer **already contains the required backends** (official vendor releases, unmodified):
 

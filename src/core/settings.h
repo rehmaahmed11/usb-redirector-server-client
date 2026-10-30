@@ -16,6 +16,7 @@ struct Settings {
     bool autoShareAll = false;             // "share all" without per-device confirmation
     bool requireApproval = true;           // always true in the UI; kept for clarity
     bool autoReshareOnReenumerate = false; // never auto-attach; re-share only when asked
+    bool allowLegacyTls = true;            // offer TLS 1.0/1.1 so Windows XP/Vista peers can connect
     std::string publicHost;                // DDNS name / public IP for direct mode (optional)
 
     // --- relay ---

@@ -65,7 +65,7 @@ stage "Build core tests" \
     "$CXX -std=c++17 -Wall -Wextra tests/test_core.cpp src/core/*.cpp" \
     "$LOG_DIR/10-core-build.log" \
     "$CXX -std=c++17 -O2 -Wall -Wextra -Isrc tests/test_core.cpp \
-        src/core/base32.cpp src/core/logger.cpp src/core/pairing.cpp src/core/protocol.cpp \
+        src/core/base32.cpp src/core/logger.cpp src/core/os_support.cpp src/core/pairing.cpp src/core/protocol.cpp \
         src/core/session_auth.cpp src/core/settings.cpp src/core/sha256.cpp \
         src/core/strings.cpp src/core/usbip_wire.cpp -o '$CORE_BIN'"
 
@@ -85,6 +85,17 @@ if [ -f "$RELAY_BIN" ]; then
         "$LOG_DIR/40-relay-run.log" "'$PY' tests/test_relay.py '$RELAY_BIN'"
 fi
 
+# 4b. legacy Windows (XP SP3 ... 11) compatibility: no post-XP API outside the
+#     runtime shim, and the lint itself is proved to fail on a violation.
+stage "Legacy Windows lint" "$PY ci/check_legacy_compat.py" \
+    "$LOG_DIR/45-legacy-lint.log" \
+    "'$PY' ci/check_legacy_compat.py && '$PY' ci/check_legacy_compat.py --self-test"
+
+# 4c. compile every Windows source against the Windows XP SP3 API surface
+#     (skips cleanly when no MinGW cross compiler is installed).
+stage "Windows XP target compile" "bash ci/xp-compile-check.sh" \
+    "$LOG_DIR/46-xp-compile.log" "bash ci/xp-compile-check.sh"
+
 # 5. the installer script must only reference files that exist
 stage "Installer sources lint" "$PY ci/check_iss_sources.py installer/MiniUsbBridge.iss --allow 'dist/app/*'" \
     "$LOG_DIR/50-iss-lint.log" \
@@ -98,6 +109,11 @@ stage "Backend fetch dry-run" "$PY ci/fetch-backends.py --dry-run" \
 stage "Installer backend patterns" "check bundled Sources lines" \
     "$LOG_DIR/54-backend-patterns.log" \
     "grep -q 'usbipd-win\*.msi' installer/MiniUsbBridge.iss && grep -q 'USBip\*.exe' installer/MiniUsbBridge.iss && grep -q 'BUNDLED.md' installer/MiniUsbBridge.iss && echo 'backend bundling patterns OK'"
+
+# 5c. the compatibility documents must exist and mention every supported family
+stage "Compatibility docs" "docs/COMPATIBILITY.md covers XP/7/8/8.1/10/11" \
+    "$LOG_DIR/56-compat-docs.log" \
+    "for t in 'Windows XP' 'Windows Vista' 'Windows 7' 'Windows 8.1' 'Windows 10' 'Windows 11'; do grep -q \"\$t\" docs/COMPATIBILITY.md || { echo \"missing: \$t\"; exit 1; }; done; echo 'compatibility doc covers XP - 11'"
 
 # 6. documentation sanity: every docs/*.md linked from the README must exist
 LINK_CHECK="missing=0; for f in \$(grep -o 'docs/[A-Za-z0-9._-]*[.]md' README.md | sort -u); do if [ ! -f \"\$f\" ]; then echo \"missing: \$f\"; missing=1; fi; done; echo missing=\$missing; exit \$missing"
@@ -113,7 +129,7 @@ stage "Docs link check" "every docs/*.md mentioned in README.md exists" \
     echo "| | |"
     echo "|---|---|"
     if [ "$FAILED" -eq 0 ]; then
-        echo "| Result | **PASS** - portable core, relay and installer sources verified |"
+        echo "| Result | **PASS** - portable core, relay, XP-target compile and installer sources verified |"
     else
         echo "| Result | **FAIL** at \"$FAILED_STAGE\" |"
     fi
@@ -131,6 +147,8 @@ stage "Docs link check" "every docs/*.md mentioned in README.md exists" \
     echo ""
     echo '```'
     echo "g++ core+tests -> test_core -> g++ relay -> python relay protocol tests"
+    echo "                -> check_legacy_compat.py (XP/7/8/10/11 API lint) + self-test"
+    echo "                -> xp-compile-check.sh (_WIN32_WINNT=0x0501 build of every source)"
     echo "                -> check_iss_sources.py (Inno Setup [Files] pre-flight)"
     echo "                -> docs link check"
     echo '```'
@@ -164,6 +182,7 @@ stage "Docs link check" "every docs/*.md mentioned in README.md exists" \
     echo "## What this run does not prove"
     echo ""
     echo "* No MSVC, no Windows API linking, no Inno Setup compiler - that is the Windows job."
+    echo "* No binary runs on XP/Vista/7/8/8.1 here: only the API surface is verified (compile + lint)."
     echo "* No USB hardware and no drivers: device sharing/attachment stays unverified (docs/TESTING.md)."
     echo ""
 } >"$REPORT"

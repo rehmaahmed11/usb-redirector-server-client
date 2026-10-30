@@ -11,11 +11,41 @@
 #include <fstream>
 
 #include "../core/logger.h"
+#include "../core/os_support.h"
 #include "../core/protocol.h"  // Hex()
+#include "../core/settings.h"
 #include "../core/sha256.h"
 #include "../core/strings.h"
 #include "crypto_win.h"
 #include "net.h"
+#include "wincompat.h"
+
+// Protocol flags: present in every SDK from Vista on, re-declared here with the
+// documented values so the Windows XP toolset (SDK 7.1) can build the same code.
+#ifndef SP_PROT_TLS1_0_CLIENT
+#define SP_PROT_TLS1_0_CLIENT 0x00000080
+#endif
+#ifndef SP_PROT_TLS1_0_SERVER
+#define SP_PROT_TLS1_0_SERVER 0x00000040
+#endif
+#ifndef SP_PROT_TLS1_1_CLIENT
+#define SP_PROT_TLS1_1_CLIENT 0x00000200
+#endif
+#ifndef SP_PROT_TLS1_1_SERVER
+#define SP_PROT_TLS1_1_SERVER 0x00000100
+#endif
+#ifndef SP_PROT_TLS1_2_CLIENT
+#define SP_PROT_TLS1_2_CLIENT 0x00000800
+#endif
+#ifndef SP_PROT_TLS1_2_SERVER
+#define SP_PROT_TLS1_2_SERVER 0x00000400
+#endif
+#ifndef SP_PROT_TLS1_3_CLIENT
+#define SP_PROT_TLS1_3_CLIENT 0x00002000
+#endif
+#ifndef SP_PROT_TLS1_3_SERVER
+#define SP_PROT_TLS1_3_SERVER 0x00001000
+#endif
 
 #pragma comment(lib, "secur32.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -27,6 +57,31 @@ namespace {
 constexpr wchar_t kProvName[] = L"Microsoft Enhanced Cryptographic Provider v1.0";
 
 std::wstring AsciiToWide(const std::string& s) { return Utf8ToWide(s); }
+
+// Turns the portable TLS policy (src/core/os_support.cpp) into SChannel's
+// grbitEnabledProtocols mask for the current side of the connection.
+DWORD ProtocolMaskFor(const TlsProfile& tls, bool server) {
+    DWORD mask = 0;
+    if (tls.offered & TlsProfile::kTls10) mask |= server ? SP_PROT_TLS1_0_SERVER : SP_PROT_TLS1_0_CLIENT;
+    if (tls.offered & TlsProfile::kTls11) mask |= server ? SP_PROT_TLS1_1_SERVER : SP_PROT_TLS1_1_CLIENT;
+    if (tls.offered & TlsProfile::kTls12) mask |= server ? SP_PROT_TLS1_2_SERVER : SP_PROT_TLS1_2_CLIENT;
+    if (tls.offered & TlsProfile::kTls13) mask |= server ? SP_PROT_TLS1_3_SERVER : SP_PROT_TLS1_3_CLIENT;
+    return mask;
+}
+
+const char* ProtocolName(DWORD protocol) {
+    switch (protocol) {
+        case 0x00000002: return "SSL 2.0";
+        case 0x00000004: return "SSL 3.0";
+        case 0x00000008: return "TLS 1.0";
+        case 0x00000010: return "TLS 1.1";
+        case 0x00000020: return "TLS 1.2";
+        case 0x00000040: return "TLS 1.3";
+        default: return "unknown protocol";
+    }
+}
+
+TlsProfile CurrentTlsPolicy() { return TlsProfileFor(OsInfo(), GetSettings().allowLegacyTls); }
 
 bool GenPassword(std::string& out) {
     uint8_t raw[16];
@@ -109,7 +164,16 @@ bool CreateSelfSignedIdentity(TlsIdentity& id, std::string* err) {
     GetSystemTime(&endTime);
     endTime.wYear = static_cast<WORD>(endTime.wYear + 10);  // 10 year validity
 
-    PCCERT_CONTEXT cert = CertCreateSelfSignCertificate(prov, &subject, 0, &keyProv, nullptr, nullptr, &endTime, nullptr);
+    // Windows XP's SChannel only understands SHA-1 signatures, so an identity
+    // created on XP is signed with SHA-1; everything newer gets SHA-256.
+    CRYPT_ALGORITHM_IDENTIFIER sigAlg{};
+    const TlsProfile tls = CurrentTlsPolicy();
+    sigAlg.pszObjId = const_cast<LPSTR>(tls.sha1Certificate ? szOID_OIWSEC_sha1 : szOID_NIST_sha256);
+    LogI("tls", std::string("Creating server identity, certificate signature ") +
+                   (tls.sha1Certificate ? "SHA-1 (legacy SChannel)" : "SHA-256"));
+
+    PCCERT_CONTEXT cert =
+        CertCreateSelfSignCertificate(prov, &subject, 0, &keyProv, &sigAlg, nullptr, &endTime, nullptr);
     if (!cert) {
         DWORD e = GetLastError();
         CryptDestroyKey(key);
@@ -304,9 +368,18 @@ bool TlsChannel::sspiError(SECURITY_STATUS st, const char* where, std::string* e
 }
 
 bool TlsChannel::Handshake(const TlsIdentity* serverId, const uint8_t* pin, bool server, std::string* err) {
+    // Protocol set and cipher policy depend on this Windows version (XP only has
+    // TLS 1.0 and no AES/strong-crypto flag; Windows 10 offers up to TLS 1.2
+    // through the SCHANNEL_CRED structure used here).
+    const TlsProfile tls = CurrentTlsPolicy();
     SCHANNEL_CRED cred{};
     cred.dwVersion = SCHANNEL_CRED_VERSION;
-    cred.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS | SCH_USE_STRONG_CRYPTO;
+    // 0 = "use the operating system policy" (respects registry hardening on
+    // Vista+); an explicit mask is only used where the OS default is not enough.
+    cred.grbitEnabledProtocols = tls.useSystemDefault ? 0 : ProtocolMaskFor(tls, server);
+    cred.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS;
+    if (tls.strongCrypto) cred.dwFlags |= SCH_USE_STRONG_CRYPTO;
+    LogI("tls", std::string("TLS policy: ") + tls.description + " (mask 0x" + Hex(&cred.grbitEnabledProtocols, 4) + ")");
     HCERTSTORE pfxStore = nullptr;
     PCCERT_CONTEXT certCtx = nullptr;
 
@@ -375,6 +448,15 @@ bool TlsChannel::Handshake(const TlsIdentity* serverId, const uint8_t* pin, bool
     ci.dwVersion = SECPKG_ATTR_CIPHER_INFO;
     if (QueryContextAttributesW(&ctx_, SECPKG_ATTR_CIPHER_INFO, &ci) == SEC_E_OK) {
         cipher_ = WideToUtf8(ci.szCipherSuite);
+    }
+    SecPkgContext_ConnectionInfo conn{};
+    if (QueryContextAttributesW(&ctx_, SECPKG_ATTR_CONNECTION_INFO, &conn) == SEC_E_OK) {
+        LogI("tls", std::string(server ? "server" : "client") + " negotiated " + ProtocolName(conn.dwProtocol) +
+                       " / " + cipher_);
+        if (conn.dwProtocol <= 0x00000008) {
+            LogW("tls", "This session uses TLS 1.0 because one side runs a legacy Windows version; "
+                        "upgrade it for TLS 1.2");
+        }
     }
     in_.clear();
     plain_.clear();
