@@ -56,6 +56,9 @@ Use two Windows 10 PCs. Mark each row when you have actually seen the stated evi
 | 13 | Unauthorized clients cannot access | press **Reject**; try `usbip.exe attach -r <server-ip>` from outside | *Access rejected*; the raw port 3240 is not reachable (firewall rule) and there is no plaintext USB/IP listener |
 | 14 | Connection loss reported | disconnect the client's network during a session | *Connection Lost — Waiting for Reconnection*, then either resume or an explicit error |
 | 15 | No fake attachment | on a client **without** the usbip-win2 driver, press ATTACH | error: *no USB device … appeared in Device Manager. The attach is NOT trusted*; nothing is added to Device Manager |
+| 16 | `host:port` advertised address | set **Public address** to `127.0.0.1:<a forwarded port>` with a port that is not 4437, start the server | the server card shows `Address 127.0.0.1:<port>` and the client's `Direct` connect goes to that port (see the `Advertised address:` log line) |
+| 17 | Free tunnel path (playit.gg or similar) | run the tunnel agent on the server PC, put `name.host:port` into **Public address**, connect from a different network | card shows `public address OK`, client shows *Direct*; unplug the tunnel and the client reports *Connection Lost — Waiting for Reconnection* rather than silently idling |
+| 18 | LAN-only warning is honest | clear **Public address**, relay disabled, start the server | card shows the LAN IP with a **LAN only – set Public address in Settings** warning, and a client on another network fails with the "cannot reach" message instead of pretending to work |
 
 Extra negative tests worth running:
 

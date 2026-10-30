@@ -39,6 +39,8 @@ public:
     std::string CodeText() const;
     uint64_t CodeExpiresUnix() const;
     std::string EndpointText() const;
+    // "LAN only - set Public address in Settings" / "public address OK" / ...
+    std::string ReachabilityNote() const;
     std::string TransportText() const;
 
     State CurrentState() const;

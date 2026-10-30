@@ -228,7 +228,7 @@ bool ShowSettings(HWND parent) {
     AddLabel(&ctx, L"Pairing code lifetime (s)", 320, row + 3, 200);
     AddEdit(&ctx, kIdEditTtl, std::to_string(s.codeTtlSeconds), 520, row, 70);
     row += step;
-    AddLabel(&ctx, L"Public address / DDNS (optional)", left, row + 3, 180);
+    AddLabel(&ctx, L"Public address (host or host:port)", left, row + 3, 180);
     AddEdit(&ctx, kIdEditPublicHost, s.publicHost, fieldX, row, fieldW);
     row += step;
     AddCheck(&ctx, kIdCheckSingleUse, L"Pairing code is single use (recommended)", s.singleUseCode, left, row, 420);

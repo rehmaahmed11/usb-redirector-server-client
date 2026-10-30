@@ -183,8 +183,10 @@ bool ClientMode::OpenTransport(const PairingCode& code, const std::string& /*exp
     }
     if (err) {
         *err = "Cannot reach the server: " + directError +
-               ". Ask the server user to enable the relay in Settings (both sides need it), "
-               "or forward TCP port " + std::to_string(code.directPort) + " on the server router.";
+               ". Ask the server user to put a reachable address in Settings > Public address "
+               "(a Tailscale/ZeroTier IP, or a tunnel host:port such as name.playit.gg:25565), "
+               "or to forward TCP port " + std::to_string(code.directPort) +
+               " on the router, or to turn the relay on at both ends.";
     }
     return false;
 }

@@ -158,15 +158,35 @@ void ServerMode::RegenerateCode() {
     code.expiresUnix = static_cast<uint32_t>(NowUnix() + s.codeTtlSeconds);
     if (identity_) std::memcpy(code.certPin, identity_->pin, sizeof(code.certPin));
 
+    // The advertised address may be a plain host ("100.64.0.5" from Tailscale, or a
+    // DDNS name) or "host:port" - a free tunnel such as playit.gg publishes a random
+    // port, so the port inside the code has to be able to differ from the local
+    // listener. Our own listener always stays on serverPort.
     std::string host = s.publicHost;
-    if (host.empty()) host = LocalIPv4();
+    uint16_t advertisedPort = s.serverPort;
+    if (host.empty()) {
+        host = LocalIPv4();
+    } else {
+        std::string parsedHost;
+        uint16_t parsedPort = 0;
+        SplitHostPort(host, &parsedHost, &parsedPort);
+        if (!parsedHost.empty()) host = parsedHost;
+        if (parsedPort) advertisedPort = parsedPort;
+        if (host.size() > kMaxHostLen) {
+            LogW("server", "Public address is longer than " + std::to_string(kMaxHostLen) +
+                               " characters and was truncated");
+            host = host.substr(0, kMaxHostLen);
+        }
+    }
     if (!host.empty()) {
         code.flags |= kPairFlagDirect;
-        code.directPort = s.serverPort;
+        code.directPort = advertisedPort;
         code.host = host;
         if (IsPrivateIPv4(host)) code.flags |= kPairFlagLanOnly;
     }
     if (s.relayEnabled && !s.relayHost.empty()) code.flags |= kPairFlagRelay;
+    LogI("server", "Advertised address: " + (host.empty() ? std::string("-") : code.Endpoint()) +
+                       (code.flags & kPairFlagRelay ? " (relay also available)" : ""));
 
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -197,6 +217,18 @@ std::string ServerMode::EndpointText() const {
     std::string txt = code_.HasDirect() ? code_.Endpoint() : std::string("-");
     if (code_.HasRelay()) txt += "  + relay";
     return txt;
+}
+
+// Short, honest answer to "can my friend on another network use this code?".
+std::string ServerMode::ReachabilityNote() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    const bool relay = (code_.flags & kPairFlagRelay) != 0;
+    if (!code_.HasDirect()) return relay ? "relay only" : "no route";
+    if (IsPrivateIPv4(code_.host)) {
+        return relay ? "LAN address - relay handles the internet"
+                     : "LAN only - set Public address in Settings";
+    }
+    return "public address OK";
 }
 
 std::string ServerMode::TransportText() const {

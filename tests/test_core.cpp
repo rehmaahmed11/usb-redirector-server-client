@@ -435,6 +435,57 @@ static void TestUsbipWire() {
     CHECK(!ParseUsbipImport(buf, sizeof(buf), imp, &err));
 }
 
+// The Public address field accepts a bare host, "host:port", a scheme prefix or a
+// pasted URL. This is what makes free TCP tunnels (playit.gg, cloudflared, ngrok)
+// usable, because they publish a random port that is not our local 4437.
+static void TestSplitHostPort() {
+    std::string host;
+    uint16_t port = 0;
+
+    SplitHostPort("192.168.1.20", &host, &port);
+    CHECK_EQ_STR(host, "192.168.1.20");
+    CHECK(port == 0);
+
+    SplitHostPort("100.101.102.103:4437", &host, &port);
+    CHECK_EQ_STR(host, "100.101.102.103");
+    CHECK(port == 4437);
+
+    SplitHostPort("  quiet-marble-otter.trycloudflare.com:25565 ", &host, &port);
+    CHECK_EQ_STR(host, "quiet-marble-otter.trycloudflare.com");
+    CHECK(port == 25565);
+
+    SplitHostPort("tcp://something.at.playit.gg:12345", &host, &port);
+    CHECK_EQ_STR(host, "something.at.playit.gg");
+    CHECK(port == 12345);
+
+    SplitHostPort("myhost.ddns.net/", &host, &port);
+    CHECK_EQ_STR(host, "myhost.ddns.net");
+    CHECK(port == 0);
+
+    SplitHostPort("[::1]:6000", &host, &port);
+    CHECK_EQ_STR(host, "::1");
+    CHECK(port == 6000);
+
+    // Out of range / junk ports fall back to the caller's default instead of
+    // producing a nonsense endpoint in the pairing code.
+    SplitHostPort("example.com:70000", &host, &port);
+    CHECK_EQ_STR(host, "example.com:70000");
+    CHECK(port == 0);
+
+    SplitHostPort("example.com:0", &host, &port);
+    CHECK(port == 0);
+
+    SplitHostPort("", &host, &port);
+    CHECK(host.empty());
+    CHECK(port == 0);
+
+    // A hostname that fits the 64-byte pairing-code field survives unchanged.
+    const std::string tunnel = "something-random.at.playit.gg";
+    SplitHostPort(tunnel + ":25565", &host, &port);
+    CHECK(host.size() <= kMaxHostLen);
+    CHECK(port == 25565);
+}
+
 int main() {
     std::printf("Mini USB Bridge core tests\n==========================\n");
     TestSha256();
@@ -446,6 +497,7 @@ int main() {
     TestStrings();
     TestPairingDecisions();
     TestUsbipWire();
+    TestSplitHostPort();
     std::printf("==========================\n%d checks, %d failure(s)\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

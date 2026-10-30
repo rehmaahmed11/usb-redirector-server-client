@@ -183,6 +183,68 @@ std::string FormatHexBytes(const void* data, size_t len, size_t limit) {
     return s;
 }
 
+void SplitHostPort(const std::string& input, std::string* host, uint16_t* port) {
+    if (host) host->clear();
+    if (port) *port = 0;
+    std::string text = Trim(input);
+    if (text.empty()) return;
+
+    // Drop a scheme prefix ("tcp://", "tls://", "http://", ...) - tunnel
+    // dashboards hand out addresses in that form and users paste them as-is.
+    size_t scheme = text.find("://");
+    if (scheme != std::string::npos && scheme < 12) text = text.substr(scheme + 3);
+    // Drop any path part ("host:port/") and trailing slashes.
+    size_t slash = text.find('/');
+    if (slash != std::string::npos) text = text.substr(0, slash);
+    text = Trim(text);
+    if (text.empty()) return;
+
+    std::string hostPart = text;
+    uint16_t portValue = 0;
+
+    if (!text.empty() && text[0] == '[') {
+        // [IPv6]:port
+        size_t close = text.find(']');
+        if (close != std::string::npos) {
+            hostPart = text.substr(1, close - 1);
+            if (close + 1 < text.size() && text[close + 1] == ':') portValue = 0;
+            if (close + 1 < text.size() && text[close + 1] == ':') {
+                const std::string tail = text.substr(close + 2);
+                unsigned long v = 0;
+                bool digits = !tail.empty();
+                for (char c : tail) {
+                    if (c < '0' || c > '9') { digits = false; break; }
+                    v = v * 10 + static_cast<unsigned long>(c - '0');
+                    if (v > 65535) { digits = false; break; }
+                }
+                portValue = digits ? static_cast<uint16_t>(v) : 0;
+            }
+            if (host) *host = hostPart;
+            if (port) *port = portValue;
+            return;
+        }
+    }
+
+    size_t colon = text.rfind(':');
+    if (colon != std::string::npos && text.find(':') == colon) {  // exactly one ':'
+        const std::string tail = text.substr(colon + 1);
+        unsigned long v = 0;
+        bool digits = !tail.empty() && tail.size() <= 5;
+        for (char c : tail) {
+            if (c < '0' || c > '9') { digits = false; break; }
+            v = v * 10 + static_cast<unsigned long>(c - '0');
+        }
+        if (digits && v >= 1 && v <= 65535) {
+            portValue = static_cast<uint16_t>(v);
+            hostPart = text.substr(0, colon);
+        }
+    }
+
+    hostPart = Trim(hostPart);
+    if (host && !hostPart.empty()) *host = hostPart;
+    if (port) *port = portValue;
+}
+
 uint64_t NowUnix() { return static_cast<uint64_t>(::time(nullptr)); }
 
 uint64_t UnixAddSeconds(uint64_t base, uint64_t seconds) { return base + seconds; }

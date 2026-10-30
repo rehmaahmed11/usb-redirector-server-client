@@ -1,6 +1,8 @@
 # Mini USB Bridge — Quick start
 
-Two PCs, two internet connections, no port forwarding required (a relay handles the hard cases).
+Two PCs, two internet connections. No port forwarding, no VPS and no paid service is needed — see
+[NETWORKING.md](NETWORKING.md) for the free ways to get a path between the two machines (a Tailscale mesh
+is the easiest, a free TCP tunnel the most locked-down-friendly).
 
 ## 0. Install the pieces
 
@@ -65,7 +67,7 @@ Closing the app detaches everything it attached.
 | Pairing code lifetime | 300 s | the code expires and a new one is generated automatically |
 | Single-use code | on | one successful pairing per code |
 | Relay host / port | empty / 4443 | set both on both PCs to enable NAT traversal through your relay |
-| Public address / DDNS | empty | put your DNS name here if the server has a reachable inbound port |
+| Public address | empty | a reachable host or `host:port`: DDNS name, Tailscale IP, or a tunnel address — see [NETWORKING.md](NETWORKING.md) |
 | Local tunnel port | 4240 | loopback port handed to `usbip.exe --tcp-port` |
 | Verify attach in Device Manager | on | never report "attached" without a real device node |
 | Block inbound 3240 (Settings → Firewall) | — | closes the raw USB/IP port to the network (needs UAC once) |

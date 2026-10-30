@@ -80,11 +80,21 @@ Details, screenshots-in-words and the MediaTek notes: [`docs/QUICKSTART.md`](doc
 
 * The pairing code contains the server's address, so **direct connections work** on a LAN, through a
   forwarded port, or over a VPN/tailnet (WireGuard, Tailscale, ZeroTier).
+* **Public address** in Settings accepts a bare host *or* `host:port`, so a free outbound-only TCP tunnel
+  (e.g. `frosty-meadow.at.playit.gg:25565`, or any `tcp://…` string a dashboard gives you) can be
+  advertised without touching the local listener. The server card shows the advertised address and says
+  whether it is reachable from the internet (`LAN only – set Public address in Settings` vs
+  `public address OK`).
 * Two arbitrary NATs cannot be joined without infrastructure. This project therefore ships a small
   **relay** (`relay/relay.cpp`, also runs on Linux) that both sides connect *out* to; the relay only
   splices bytes and cannot read them (TLS stays end-to-end). See [`docs/RELAY.md`](docs/RELAY.md).
 * The UI tells you which path is in use: *Direct* or *Relay*. It never pretends a relayed session is
   direct. UDP hole punching / STUN / ICE is **not** implemented.
+* **No money and no server?** [`docs/NETWORKING.md`](docs/NETWORKING.md) walks through the four workable
+  routes for a friend on the other side of the planet: a free Tailscale/ZeroTier mesh (best), a free
+  outbound-only TCP tunnel, Windows' own RDP USB redirection (Pro/Enterprise only, and its limits), and a
+  free-tier VPS for the bundled relay. It also lists the shortcuts that do *not* work, such as tunnelling
+  through AnyDesk/TeamViewer/Parsec.
 
 ### How the two PCs actually find each other (different networks)
 
@@ -214,7 +224,8 @@ src/ui/                    main_window (owner-drawn Win32), settings_dialog + ap
 relay/relay.cpp            self-hostable relay (Windows and Linux)
 installer/                 Inno Setup script
 tests/                     core unit tests + relay protocol tests
-docs/                      QUICKSTART, TROUBLESHOOTING, ARCHITECTURE, SECURITY, RELAY, TESTING
+docs/                      QUICKSTART, NETWORKING, TROUBLESHOOTING, ARCHITECTURE,
+                           SECURITY, RELAY, TESTING
 ```
 
 ## Backends, licenses and what is *not* bundled

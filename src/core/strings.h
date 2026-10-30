@@ -18,6 +18,14 @@ std::string Lower(const std::string& s);
 // "1-4" style USB/IP bus id sanity check (bus-port[.port]).
 bool IsValidBusId(const std::string& busid);
 
+// Splits a user-entered address into host + optional port. Accepts
+//   "host" / "host:port" / "1.2.3.4:5555" / "[::1]:5555" / "tcp://host:port"
+// and tolerates spaces, a trailing '/' and an upper-case scheme.
+// port is set to 0 when the text has no (valid) port, in which case the caller
+// keeps its own default. Scheme prefixes are dropped, so a URL pasted from a
+// tunnel dashboard ("tcp://foo.example.com:12345") works unchanged.
+void SplitHostPort(const std::string& input, std::string* host, uint16_t* port);
+
 // Formats a UTC unix timestamp as "2026-10-30 12:34:56Z".
 std::string FormatUtc(uint64_t unixSeconds);
 // Remaining time as "4:59" (or "--:--" when unknown/expired).

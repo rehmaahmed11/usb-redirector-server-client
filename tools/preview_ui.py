@@ -255,12 +255,17 @@ def preview_server(path):
     c.button(regen_btn, "Regenerate", "secondary")
     c.text((card_s[0] + pad, copy_btn[3] + sc(8)), "Expires in 4:38   \u2022   Waiting for Client", c.f_small,
            TEXT_DIM)
+    # Address that goes into the code, plus whether the internet can use it.
+    line2 = copy_btn[3] + sc(23)
+    c.text((card_s[0] + pad, line2), "Address 100.101.102.103:4437", c.f_small, TEXT_FAINT)
+    c.text((card_s[2] - pad - c.d.textlength("public address OK", font=c.f_small), line2),
+           "public address OK", c.f_small, SUCCESS)
 
     c.text((card_c[0] + pad, card_c[1] + sc(12)), "CONNECTED CLIENT", c.f_small, TEXT_FAINT)
     c.ellipsis((card_c[0] + pad, card_c[1] + sc(38), card_c[2] - pad, card_c[1] + sc(58)),
                "No client connected", c.f_bold, TEXT)
     c.ellipsis((card_c[0] + pad, card_c[1] + sc(60), card_c[2] - pad, card_c[1] + sc(78)),
-               "Endpoint: 192.168.1.20:4437", c.f_small, TEXT_DIM)
+               "Endpoint: 100.101.102.103:4437", c.f_small, TEXT_DIM)
     c.ellipsis((card_c[0] + pad, card_c[1] + sc(80), card_c[2] - pad, card_c[1] + sc(96)),
                "Approval is always required before a client can use your devices.", c.f_small, TEXT_FAINT)
     c.button((card_c[0] + pad, card_c[3] - sc(42), card_c[0] + pad + sc(150), card_c[3] - sc(14)),

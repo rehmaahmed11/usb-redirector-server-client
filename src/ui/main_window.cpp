@@ -717,10 +717,26 @@ void MainWindow::PaintServer(HDC dc, RECT content) {
         ui::DrawTextIn(dc, W(serverCode_), textRc, fontMono_, theme::kMono, DT_LEFT | DT_WORDBREAK);
     }
     std::string expiry = serverExpiry_ ? ("Expires in " + FormatCountdown(NowUnix(), serverExpiry_)) : "";
+    const int line1Top = layout_.copyBtn.bottom + MulDiv(6, dpi_, 96);
+    const int line2Top = line1Top + MulDiv(15, dpi_, 96);
     ui::DrawTextEllipsis(dc, W(expiry + "   \u2022   " + serverStatus_),
-                         RECT{layout_.cardServer.left + pad, layout_.copyBtn.bottom + MulDiv(6, dpi_, 96),
-                              layout_.cardServer.right - pad, layout_.cardServer.bottom - MulDiv(8, dpi_, 96)},
+                         RECT{layout_.cardServer.left + pad, line1Top, layout_.cardServer.right - pad,
+                              line1Top + MulDiv(14, dpi_, 96)},
                          fontSmall_, theme::kTextDim, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    // Which address the client will dial, and whether a friend on another network
+    // can actually use this code. Right-aligned so it never pushes the address off.
+    const bool reachWarn = !serverNote_.empty() && serverNote_.rfind("LAN only", 0) == 0;
+    ui::DrawTextEllipsis(dc, W("Address " + (serverEndpoint_.empty() ? std::string("-") : serverEndpoint_)),
+                         RECT{layout_.cardServer.left + pad, line2Top,
+                              layout_.cardServer.left + pad + MulDiv(300, dpi_, 96), line2Top + MulDiv(14, dpi_, 96)},
+                         fontSmall_, theme::kTextFaint, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    if (!serverNote_.empty()) {
+        ui::DrawTextEllipsis(dc, W(serverNote_),
+                             RECT{layout_.cardServer.left + pad + MulDiv(300, dpi_, 96), line2Top,
+                                  layout_.cardServer.right - pad, line2Top + MulDiv(14, dpi_, 96)},
+                             fontSmall_, reachWarn ? theme::kWarn : theme::kSuccess,
+                             DT_RIGHT | DT_TOP | DT_SINGLELINE);
+    }
 
     // --- client card ---
     ui::FillRoundRect(dc, layout_.cardClient, MulDiv(10, dpi_, 96), theme::kCard);
@@ -1018,6 +1034,7 @@ void MainWindow::SwitchMode(Mode mode) {
             serverCode_ = ServerMode::Instance().CodeText();
             serverExpiry_ = ServerMode::Instance().CodeExpiresUnix();
             serverEndpoint_ = ServerMode::Instance().EndpointText();
+            serverNote_ = ServerMode::Instance().ReachabilityNote();
             serverStatus_ = ServerMode::Instance().StateText();
         } else {
             serverStatus_ = "Error";
@@ -1299,6 +1316,7 @@ void MainWindow::OnUiEvent(std::shared_ptr<UiEvent> ev) {
             serverExpiry_ = ServerMode::Instance().CodeExpiresUnix();
             serverCode_ = ServerMode::Instance().CodeText();
             serverEndpoint_ = ServerMode::Instance().EndpointText();
+            serverNote_ = ServerMode::Instance().ReachabilityNote();
             Layout();
             break;
         case UiKind::ServerCode:
@@ -1358,6 +1376,7 @@ void MainWindow::ShowSettingsDialog() {
         if (mode_ == Mode::Server && ServerMode::Instance().Running()) {
             serverCode_ = ServerMode::Instance().CodeText();
             serverEndpoint_ = ServerMode::Instance().EndpointText();
+            serverNote_ = ServerMode::Instance().ReachabilityNote();
         }
     }
     Layout();

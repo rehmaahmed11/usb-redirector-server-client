@@ -89,6 +89,7 @@ private:
     uint64_t serverExpiry_ = 0;
     std::string serverClient_ = "No client connected";
     std::string serverEndpoint_ = "-";
+    std::string serverNote_;  // "LAN only - set Public address in Settings", ...
     bool serverClientOnline_ = false;
     std::vector<DeviceEntry> serverDevices_;
     std::vector<UsbDeviceRow> serverRows_;
