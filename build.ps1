@@ -14,7 +14,8 @@ param(
     [string]$MinWin = "win10",
     [ValidateSet("auto", "x86", "x64")]
     [string]$Platform = "auto",
-    [string]$Toolset = ""
+    [string]$Toolset = "",
+    [string]$Generator = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,20 +60,50 @@ if ($Clean) {
     return
 }
 
-# Configure. The Visual Studio generator picks up the installed MSVC toolset.
+# Configure.
+#
+# The generator name is deliberately NOT pinned: the Windows runners already use
+# a newer Visual Studio than any hardcoded "-G Visual Studio 17 2022" (CMake
+# then fails with "could not find any instance of Visual Studio"), and a user may
+# only have Ninja. So: try the default generator with an explicit architecture,
+# then the default without it, then Ninja - each time with a clean build
+# directory, because a failed configure leaves a cache that pins the generator.
+function Invoke-Configure {
+    param([string]$Gen, [string]$Arch, [string]$ExtraToolset)
+    $cfgArgs = @("-S", $root, "-B", $buildDir, "-DMUB_MIN_WIN=$MinWin")
+    if ($Gen) { $cfgArgs += @("-G", $Gen) }
+    if ($Arch) { $cfgArgs += @("-A", $Arch) }
+    if ($ExtraToolset) { $cfgArgs += @("-T", $ExtraToolset) }
+    Remove-Item -Recurse -Force $buildDir -ErrorAction SilentlyContinue
+    Write-Host ("cmake " + ($cfgArgs -join " ")) -ForegroundColor DarkGray
+    # Out-Host keeps cmake's own output visible without mixing it into the
+    # function's return value (which must be the exit code only).
+    & $cmake @cfgArgs 2>&1 | Out-Host
+    return $LASTEXITCODE
+}
+
 if (-not (Test-Path "$buildDir\CMakeCache.txt")) {
-    $cfgArgs = @("-S", $root, "-B", $buildDir, "-G", "Visual Studio 17 2022", "-A", $Platform,
-                 "-DMUB_MIN_WIN=$MinWin")
-    if ($Toolset) { $cfgArgs += @("-T", $Toolset) }
-    & $cmake @cfgArgs
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Visual Studio 17 2022 with this toolset is unavailable, falling back to the default generator..." -ForegroundColor Yellow
-        $cfgArgs = @("-S", $root, "-B", $buildDir, "-A", $Platform, "-DMUB_MIN_WIN=$MinWin")
-        if ($Toolset) { $cfgArgs += @("-T", $Toolset) }
-        & $cmake @cfgArgs
-        if ($LASTEXITCODE -ne 0 -and $MinWin -eq "xp") {
+    $attempts = @()
+    if ($Generator) {
+        $attempts += @{ Gen = $Generator; Arch = $Platform }
+    } else {
+        $attempts += @{ Gen = ""; Arch = $Platform }   # default generator (newest VS on the machine)
+        $attempts += @{ Gen = ""; Arch = "" }          # single-config generators reject -A
+        $attempts += @{ Gen = "Ninja"; Arch = "" }     # no Visual Studio at all
+    }
+
+    $configured = $false
+    foreach ($attempt in $attempts) {
+        $code = Invoke-Configure -Gen $attempt.Gen -Arch $attempt.Arch -ExtraToolset $Toolset
+        if ($code -eq 0) { $configured = $true; break }
+        Write-Host ("configure with generator '" + $(if ($attempt.Gen) { $attempt.Gen } else { "default" }) +
+                    "' failed - trying the next option...") -ForegroundColor Yellow
+    }
+
+    if (-not $configured) {
+        if ($MinWin -eq "xp") {
             throw @"
-The Windows XP build needs the XP toolset, which Visual Studio 2022 does not ship.
+The Windows XP build needs the XP toolset, which current Visual Studio versions do not ship.
   * Install Visual Studio 2017 or 2019 with the component
     "C++ Windows XP Support for VS 2017 (v141) tools".
   * Run:  .\build.ps1 -MinWin xp -Toolset v141_xp
@@ -80,7 +111,7 @@ The Windows XP build needs the XP toolset, which Visual Studio 2022 does not shi
   * A MinGW user can also run:  cmake -S . -B build-xp -DMUB_MIN_WIN=xp
 "@
         }
-        if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+        throw "CMake configure failed: no working generator (see the messages above)"
     }
 }
 
