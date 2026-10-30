@@ -1,0 +1,32 @@
+// Mini USB Bridge - resources
+// SPDX-License-Identifier: MIT
+#include <windows.h>
+#include "resource.h"
+
+IDI_APP ICON "app.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Mini USB Bridge"
+            VALUE "FileDescription", "Mini USB Bridge - USB devices over the internet"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "MiniUsbBridge"
+            VALUE "LegalCopyright", "MIT License"
+            VALUE "OriginalFilename", "MiniUsbBridge.exe"
+            VALUE "ProductName", "Mini USB Bridge"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
