@@ -37,7 +37,11 @@ jobs:
       - name: Install the MinGW-w64 cross compiler (Windows XP target compile check)
         # ci/xp-compile-check.sh compiles every source with -D_WIN32_WINNT=0x0501,
         # where the headers hide post-XP APIs. It skips cleanly without a compiler.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-i686
+        run: |
+          sudo apt-get update -qq
+          # -posix is the variant with std::thread/std::condition_variable support.
+          sudo apt-get install -y -qq g++-mingw-w64-i686 g++-mingw-w64-i686-posix ||
+            sudo apt-get install -y -qq g++-mingw-w64-i686
 
       - name: Portable core, relay, XP-compatibility and installer-source checks
         run: bash ci/linux-check.sh
@@ -69,10 +73,39 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build the Vista-target binary (static CRT) and its installer
-        # Proves the -MinWin path works without the Visual Studio 2022-only
-        # toolchain assumptions: _WIN32_WINNT=0x0600, static runtime,
+        # Proves the -MinWin path works: _WIN32_WINNT=0x0600, static runtime,
         # MiniUsbBridgeLegacy.iss (Windows 7 SP1+), PE import check.
-        run: ./build.ps1 -MinWin vista -Installer
+        # The output is captured so a failure can be published as a PR comment
+        # (the Actions log viewer is not always reachable).
+        run: |
+          New-Item -ItemType Directory -Force dist/ci | Out-Null
+          $log = "dist/ci/legacy-build.log"
+          & ./build.ps1 -MinWin vista -Installer *>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          $tail = @(Get-Content $log -Tail 120 -ErrorAction SilentlyContinue)
+          $report = @(
+            "# Legacy build report (Vista target)",
+            "",
+            "| | |",
+            "|---|---|",
+            "| Result | $(if ($code -eq 0) { '**PASS**' } else { "**FAIL** (exit $code)" }) |",
+            "| Command | ``./build.ps1 -MinWin vista -Installer`` |",
+            "| Target | ``_WIN32_WINNT=0x0600``, static CRT, x64 |",
+            "",
+            "## Last 120 lines",
+            "",
+            "``````",
+            ($tail -join "`n"),
+            "``````"
+          )
+          $report | Set-Content dist/ci/toolchain-report-legacy.md
+          if ($code -ne 0) { exit $code }
+
+      - name: Publish legacy build report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-legacy -->" -Title "Legacy build report (Vista target, static CRT)"
 
       - name: Upload legacy artifacts
         if: always()

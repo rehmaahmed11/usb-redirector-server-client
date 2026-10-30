@@ -98,6 +98,11 @@ DENY_LIBS = {
 # yet a new use means a new behaviour on old Windows.
 REVIEW = {"GetVersionExW": "lies on Windows 8.1+; only wincompat may call it"}
 
+# Fixed-width integer types are only available through <cstdint>; MSVC pulls the
+# header in transitively, MinGW does not, so a public header must include it
+# itself (this is exactly what broke the first XP-target compile).
+FIXED_WIDTH_RE = re.compile(r"\b(?:u?int(?:8|16|32|64)_t)\b")
+
 CRT_ALLOWED_DLLS = ("msvcrt.dll", "kernel32.dll", "user32.dll", "gdi32.dll", "advapi32.dll",
                     "shell32.dll", "ole32.dll", "oleaut32.dll", "comctl32.dll", "setupapi.dll",
                     "cfgmgr32.dll", "ws2_32.dll", "secur32.dll", "crypt32.dll", "uuid.dll",
@@ -113,6 +118,32 @@ def iter_sources(dirs=None):
             for name in sorted(filenames):
                 if name.endswith((".cpp", ".h", ".c")):
                     yield os.path.join(dirpath, name)
+
+
+def check_headers(quiet: bool = False) -> int:
+    """Public headers must include <cstdint> themselves when they use uintN_t."""
+    problems = []
+    headers = 0
+    for path in iter_sources():
+        if not path.endswith(".h"):
+            continue
+        headers += 1
+        rel = os.path.normpath(os.path.relpath(path, ROOT))
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        code = strip_comments(text)
+        if FIXED_WIDTH_RE.search(code) and not re.search(r"#\s*include\s*<cstdint>", text):
+            problems.append(f"{rel}: uses uintN_t/intN_t but does not #include <cstdint> "
+                            f"(MSVC hides this, MinGW/MSVC-with-strict-headers does not)")
+    if not quiet:
+        print(f"header scan: {headers} headers checked for self-contained fixed-width types")
+    if problems:
+        for p in problems:
+            print("  FAIL " + p)
+        return 1
+    if not quiet:
+        print("  ok   every header that uses uintN_t includes <cstdint>")
+    return 0
 
 
 def strip_comments(text: str) -> str:
@@ -350,7 +381,11 @@ def main() -> int:
     ap.add_argument("--self-test", action="store_true", help="verify that the lint detects violations")
     args = ap.parse_args()
 
-    rc = self_test() if args.self_test else check_sources()
+    if args.self_test:
+        rc = self_test()
+    else:
+        rc = check_sources()
+        rc |= check_headers()
     for exe in args.exe:
         rc |= check_exe(exe, args.target)
     if rc == 0 and not args.quiet:

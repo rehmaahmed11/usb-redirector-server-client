@@ -155,12 +155,32 @@ if ($Installer) {
 
     # Inno Setup 6 builds the Windows 10 and the legacy (7+) installer; Windows XP
     # needs Inno Setup 5.6.1, which only that script understands.
-    $isccCandidates = if ($MinWin -eq "xp") {
-        @("${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe", "$env:ProgramFiles\Inno Setup 5\ISCC.exe")
-    } else {
-        @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+    $version = if ($MinWin -eq "xp") { 5 } else { 6 }
+    $iscc = $null
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+        if (-not $base) { continue }
+        foreach ($sub in @("Inno Setup $version\ISCC.exe", "Programs\Inno Setup $version\ISCC.exe")) {
+            $candidate = Join-Path $base $sub
+            if (-not $iscc -and (Test-Path $candidate)) { $iscc = $candidate }
+        }
     }
-    $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $iscc) {
+        $onPath = Get-Command iscc.exe -ErrorAction SilentlyContinue
+        if ($onPath) { $iscc = $onPath.Source }
+    }
+    if (-not $iscc -and $version -eq 6) {
+        # Same fallback the CI script uses on the Windows runner.
+        $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+        if ($choco) {
+            Write-Host "ISCC.exe not found - installing Inno Setup with Chocolatey..." -ForegroundColor Yellow
+            & $choco.Source install innosetup -y --no-progress --limit-output
+            foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+                if (-not $base) { continue }
+                $candidate = Join-Path $base "Inno Setup 6\ISCC.exe"
+                if (-not $iscc -and (Test-Path $candidate)) { $iscc = $candidate }
+            }
+        }
+    }
     if (-not $iscc) {
         if ($MinWin -eq "xp") {
             throw "Inno Setup 5.6.1 was not found (https://jrsoftware.org/download.php/is.exe is 6.x; use the 5.6.1 release from jrsoftware.org/files/old/). Inno Setup 6 cannot produce a Windows XP setup."
