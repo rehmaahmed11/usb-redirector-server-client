@@ -1,0 +1,22 @@
+# build output
+build/
+dist/
+out/
+*.obj
+*.o
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.msi
+*.zip
+# inno setup
+installer/output/
+# local artifacts
+*.log
+.DS_Store
+# bundled vendor installers (large, licensing: keep them out of git)
+installer/backends/*.msi
+installer/backends/*.exe

@@ -1,0 +1,208 @@
+// Mini USB Bridge - usbip-win2 backend wrapper implementation
+// SPDX-License-Identifier: MIT
+#include "usbip_cli.h"
+
+#include <chrono>
+#include <thread>
+
+#include "../core/logger.h"
+#include "../core/settings.h"
+#include "../core/strings.h"
+#include "../server/usb_detect.h"
+#include "../win/process.h"
+
+namespace mub {
+namespace {
+
+std::string Quote(const std::string& s) { return "\"" + s + "\""; }
+
+int ExtractPortNumber(const std::string& text) {
+    // usbip.exe prints e.g. "successfully attached to port 1" (or just "1" with --terse).
+    std::string lower = Lower(text);
+    size_t p = lower.find("port");
+    auto scan = [&](size_t from) -> int {
+        size_t i = from;
+        while (i < text.size() && (text[i] == ' ' || text[i] == ':' || text[i] == '#')) ++i;
+        int value = -1;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+            if (value < 0) value = 0;
+            value = value * 10 + (text[i] - '0');
+            ++i;
+            if (value > 255) return -1;
+        }
+        return value;
+    };
+    if (p != std::string::npos) {
+        int v = scan(p + 4);
+        if (v > 0) return v;
+    }
+    // Fall back: any standalone number in the last part of the message.
+    int v = scan(0);
+    return v > 0 ? v : -1;
+}
+
+bool IsElevationError(const std::string& text) {
+    std::string u = ToUpperAscii(text);
+    return u.find("ADMINISTRATOR") != std::string::npos || u.find("ELEVAT") != std::string::npos ||
+           u.find("ACCESS IS DENIED") != std::string::npos;
+}
+
+}  // namespace
+
+UsbipCli& UsbipCli::Instance() {
+    static UsbipCli inst;
+    return inst;
+}
+
+std::string UsbipCli::ResolvePath() {
+    const Settings& s = GetSettings();
+    if (!path_.empty() && FileExists(path_)) return path_;
+    if (!s.usbipPath.empty() && FileExists(s.usbipPath)) {
+        path_ = s.usbipPath;
+        return path_;
+    }
+    char found[MAX_PATH] = {};
+    if (SearchPathA(nullptr, "usbip.exe", nullptr, MAX_PATH, found, nullptr)) {
+        path_ = found;
+        return path_;
+    }
+    const char* candidates[] = {
+        "C:\\Program Files\\USBip\\usbip.exe",
+        "C:\\Program Files (x86)\\USBip\\usbip.exe",
+    };
+    for (const char* c : candidates) {
+        if (FileExists(c)) {
+            path_ = c;
+            return path_;
+        }
+    }
+    return {};
+}
+
+UsbipClientInfo UsbipCli::Probe(bool forceRefresh) {
+    uint64_t now = NowUnix();
+    if (!forceRefresh && probedAt_ != 0 && now - probedAt_ < 5) return cached_;
+
+    UsbipClientInfo info;
+    info.path = ResolvePath();
+    info.installed = !info.path.empty();
+    probedAt_ = now;
+    if (!info.installed) {
+        info.detail = "usbip.exe was not found. Install usbip-win2 (client driver) to attach remote devices.";
+        cached_ = info;
+        return info;
+    }
+
+    ProcessResult version = RunProcess(Widen("\"" + info.path + "\" --version"), 8000);
+    info.version = Trim(version.out.empty() ? version.err : version.out);
+
+    ProcessResult help = RunProcess(Widen("\"" + info.path + "\" --help"), 8000);
+    std::string helpText = Lower(help.out + help.err);
+    info.supportsTcpPort = helpText.find("tcp-port") != std::string::npos;
+
+    // The UDE device node is created by the driver installer.
+    info.driverPresent = DirExists("C:\\Program Files\\USBip");
+    if (info.supportsTcpPort) {
+        info.detail = "usbip.exe " + info.version + " (custom TCP port supported)";
+    } else {
+        info.detail = "usbip.exe " + info.version +
+                      " (older build: the tunnel must use TCP port 3240)";
+    }
+    cached_ = info;
+    return info;
+}
+
+UsbipCli::AttachResult UsbipCli::Attach(const std::string& host, uint16_t tcpPort, const std::string& busid,
+                                        int timeoutMs) {
+    AttachResult result;
+    UsbipClientInfo info = Probe();
+    if (!info.installed) {
+        result.message = info.detail;
+        return result;
+    }
+    if (!IsValidBusId(busid)) {
+        result.message = "Invalid bus id '" + busid + "'";
+        return result;
+    }
+
+    std::string cmd = "\"" + info.path + "\"";
+    if (info.supportsTcpPort) cmd += " --tcp-port " + std::to_string(tcpPort);
+    cmd += " attach -r " + host + " -b " + busid;
+
+    ProcessResult res = RunProcess(Widen(cmd), timeoutMs);
+    std::string text = Trim(res.Combined());
+    result.message = text;
+    if (!res.launched) {
+        result.message = res.error;
+        return result;
+    }
+    if (res.timedOut) {
+        result.message = "usbip.exe attach timed out after " + std::to_string(timeoutMs) + " ms";
+        return result;
+    }
+    std::string lower = Lower(text);
+    bool looksOk = res.exitCode == 0 && lower.find("fail") == std::string::npos &&
+                   lower.find("error") == std::string::npos;
+    if (looksOk) {
+        result.ok = true;
+        result.hubPort = ExtractPortNumber(text);
+        LogI("usbip", "attach " + busid + " -> " + text);
+    } else {
+        result.ok = false;
+        result.needsElevation = IsElevationError(text);
+        if (text.empty()) result.message = "usbip.exe attach failed (exit " + std::to_string(res.exitCode) + ")";
+        LogW("usbip", "attach " + busid + " failed: " + result.message);
+    }
+    return result;
+}
+
+UsbipCli::DetachResult UsbipCli::Detach(uint16_t tcpPort, int hubPort) {
+    DetachResult result;
+    UsbipClientInfo info = Probe();
+    if (!info.installed) {
+        result.message = info.detail;
+        return result;
+    }
+    if (hubPort <= 0) return DetachAll(tcpPort);
+    std::string cmd = "\"" + info.path + "\"";
+    if (info.supportsTcpPort) cmd += " --tcp-port " + std::to_string(tcpPort);
+    cmd += " detach -p " + std::to_string(hubPort);
+    ProcessResult res = RunProcess(Widen(cmd), 20000);
+    result.ok = res.exitCode == 0;
+    result.message = Trim(res.Combined());
+    if (result.message.empty())
+        result.message = result.ok ? "Detached port " + std::to_string(hubPort)
+                                   : "usbip.exe detach failed (exit " + std::to_string(res.exitCode) + ")";
+    return result;
+}
+
+UsbipCli::DetachResult UsbipCli::DetachAll(uint16_t tcpPort) {
+    DetachResult result;
+    UsbipClientInfo info = Probe();
+    if (!info.installed) {
+        result.message = info.detail;
+        return result;
+    }
+    std::string cmd = "\"" + info.path + "\"";
+    if (info.supportsTcpPort) cmd += " --tcp-port " + std::to_string(tcpPort);
+    cmd += " detach -a";
+    ProcessResult res = RunProcess(Widen(cmd), 20000);
+    result.ok = res.exitCode == 0;
+    result.message = Trim(res.Combined());
+    if (result.message.empty())
+        result.message = result.ok ? "Detached all virtual devices"
+                                   : "usbip.exe detach -a failed (exit " + std::to_string(res.exitCode) + ")";
+    return result;
+}
+
+bool UsbipCli::ConfirmDevicePresent(uint16_t vid, uint16_t pid, int timeoutMs) {
+    int elapsed = 0;
+    while (elapsed < timeoutMs) {
+        if (IsDevicePresent(vid, pid)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        elapsed += 250;
+    }
+    return false;
+}
+
+}  // namespace mub
