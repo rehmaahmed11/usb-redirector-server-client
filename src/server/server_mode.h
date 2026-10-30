@@ -19,7 +19,7 @@
 
 namespace mub {
 
-class TlsIdentity;
+struct TlsIdentity;
 class ControlChannel;
 struct ApprovalRequest;
 

@@ -13,7 +13,7 @@
 
 namespace mub {
 
-class TlsIdentity;
+struct TlsIdentity;
 
 // Framed, authenticated control channel over TLS.
 class ControlChannel {

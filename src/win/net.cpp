@@ -5,6 +5,9 @@
 #if defined(_WIN32)
 
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mstcpip.h>  // tcp_keepalive / SIO_KEEPALIVE_VALS: MSVC needs this header explicitly
 
 #include <cstring>
 #include <mutex>

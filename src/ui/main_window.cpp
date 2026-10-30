@@ -686,7 +686,9 @@ void MainWindow::PaintChoose(HDC dc, RECT content) {
 void MainWindow::PaintServer(HDC dc, RECT content) {
     (void)content;
     int pad = MulDiv(16, dpi_, 96);
-    int small = MulDiv(9, dpi_, 96);
+    // NB: do not call this `small` - <rpcndr.h> defines small as a macro (char),
+    // which is why MSVC rejects it while MinGW silently accepts it.
+    int smallGap = MulDiv(9, dpi_, 96);
 
     // --- pairing code card ---
     ui::FillRoundRect(dc, layout_.cardServer, MulDiv(10, dpi_, 96), theme::kCard);
@@ -835,7 +837,7 @@ void MainWindow::PaintServer(HDC dc, RECT content) {
                             layout_.devicesCard.bottom - MulDiv(16, dpi_, 96)},
                        fontSmall_, theme::kTextFaint, DT_RIGHT | DT_SINGLELINE);
     }
-    (void)small;
+    (void)smallGap;
 }
 
 void MainWindow::PaintClient(HDC dc, RECT content) {

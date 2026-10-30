@@ -412,6 +412,23 @@ function Write-Report {
         }
         $tailLog = Join-Path $logDir $failedStage.Log
         if ($failedStage.Log -and (Test-Path $tailLog)) {
+            # Every diagnostic line first - the tail alone hides earlier errors.
+            $pattern = 'error C\d+|error LNK\d+|error MSB\d+|CMake Error|fatal error|FAILED:|^Error:'
+            $allErrors = @(Select-String -Path $tailLog -Pattern $pattern -ErrorAction SilentlyContinue)
+            if ($allErrors.Count -gt 0) {
+                [void]$lines.Add("")
+                [void]$lines.Add("### All errors reported ($($allErrors.Count) line(s))")
+                [void]$lines.Add("")
+                [void]$lines.Add('```')
+                $seen = @{}
+                foreach ($e in $allErrors) {
+                    $line = $e.Line.Trim()
+                    if (-not $line -or $seen.ContainsKey($line)) { continue }
+                    $seen[$line] = $true
+                    [void]$lines.Add($line)
+                }
+                [void]$lines.Add('```')
+            }
             [void]$lines.Add("")
             [void]$lines.Add("Last 40 lines of ``$($failedStage.Log)``:")
             [void]$lines.Add("")
