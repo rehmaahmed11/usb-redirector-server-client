@@ -288,6 +288,47 @@ function Invoke-Pipeline {
     }
     if (-not $script:pipelineOk) { return }
 
+    # 4b. fetch bundled backends (makes installer fully offline)
+    $fetchLog = Join-Path $logDir "42-fetch-backends.log"
+    $script:pipelineOk = Invoke-Stage -Name "Fetch backends (offline bundle)" -Command "pwsh ci/fetch-backends.ps1" -LogPath $fetchLog -Action {
+        $fetchScript = Join-Path $root "ci/fetch-backends.ps1"
+        if (-not (Test-Path $fetchScript)) {
+            Add-Content -Path $fetchLog -Value "fetch script not found: $fetchScript (skipping, installer will show download links)"
+            return 0
+        }
+        # Run the fetch script; it never fails the build - a missing backend just means the installer shows download links
+        $code = Run-Native "pwsh" @("-NoProfile", "-File", $fetchScript) $fetchLog
+        # Also try python fallback if pwsh fetch left nothing
+        $backendMsi = @(Get-ChildItem (Join-Path $root "installer/backends") -Filter "*.msi" -ErrorAction SilentlyContinue)
+        $backendExe = @(Get-ChildItem (Join-Path $root "installer/backends") -Filter "*.exe" -ErrorAction SilentlyContinue)
+        if ($backendMsi.Count -eq 0 -or $backendExe.Count -eq 0) {
+            Add-Content -Path $fetchLog -Value "pwsh fetch did not produce both backends (msi=$($backendMsi.Count) exe=$($backendExe.Count)), trying python fallback"
+            $py = Get-Command python -ErrorAction SilentlyContinue
+            if ($py) {
+                $pyFetch = Join-Path $root "ci/fetch-backends.py"
+                if (Test-Path $pyFetch) {
+                    $code2 = Run-Native $py.Source @($pyFetch) $fetchLog
+                    Add-Content -Path $fetchLog -Value "python fallback exit code: $code2"
+                }
+            }
+        }
+        $backendMsi = @(Get-ChildItem (Join-Path $root "installer/backends") -Filter "*.msi" -ErrorAction SilentlyContinue)
+        $backendExe = @(Get-ChildItem (Join-Path $root "installer/backends") -Filter "*.exe" -ErrorAction SilentlyContinue)
+        Add-Content -Path $fetchLog -Value "bundled after fetch: msi=$($backendMsi.Count) exe=$($backendExe.Count)"
+        foreach ($f in $backendMsi + $backendExe) {
+            $mb = [math]::Round($f.Length / 1MB, 2)
+            Add-Content -Path $fetchLog -Value "  $($f.Name)  $($f.Length) bytes  $mb MB"
+        }
+        if ($backendMsi.Count -eq 0 -or $backendExe.Count -eq 0) {
+            Add-Content -Path $fetchLog -Value "WARNING: bundle incomplete - installer will show download links for missing backend"
+            Add-Content -Path $fetchLog -Value "This is not a fatal error; the installer still builds but is not fully offline"
+        } else {
+            Add-Content -Path $fetchLog -Value "All backends bundled - installer will be fully offline"
+        }
+        return 0
+    }
+    if (-not $script:pipelineOk) { return }
+
     # 5. installer
     if (-not $SkipInstaller) {
         $isccLog = Join-Path $logDir "50-installer.log"

@@ -90,6 +90,15 @@ stage "Installer sources lint" "$PY ci/check_iss_sources.py installer/MiniUsbBri
     "$LOG_DIR/50-iss-lint.log" \
     "'$PY' ci/check_iss_sources.py installer/MiniUsbBridge.iss --allow 'dist/app/*'"
 
+# 5b. bundled backends fetch script exists and --dry-run succeeds
+stage "Backend fetch dry-run" "$PY ci/fetch-backends.py --dry-run" \
+    "$LOG_DIR/52-fetch-dryrun.log" \
+    "'$PY' ci/fetch-backends.py --dry-run"
+# Also verify the ISS bundling patterns are correct (handles both vendor naming variants)
+stage "Installer backend patterns" "check bundled Sources lines" \
+    "$LOG_DIR/54-backend-patterns.log" \
+    "grep -q 'usbipd-win\*.msi' installer/MiniUsbBridge.iss && grep -q 'USBip\*.exe' installer/MiniUsbBridge.iss && grep -q 'BUNDLED.md' installer/MiniUsbBridge.iss && echo 'backend bundling patterns OK'"
+
 # 6. documentation sanity: every docs/*.md linked from the README must exist
 LINK_CHECK="missing=0; for f in \$(grep -o 'docs/[A-Za-z0-9._-]*[.]md' README.md | sort -u); do if [ ! -f \"\$f\" ]; then echo \"missing: \$f\"; missing=1; fi; done; echo missing=\$missing; exit \$missing"
 stage "Docs link check" "every docs/*.md mentioned in README.md exists" \

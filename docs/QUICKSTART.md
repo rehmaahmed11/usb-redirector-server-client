@@ -6,14 +6,21 @@ is the easiest, a free TCP tunnel the most locked-down-friendly).
 
 ## 0. Install the pieces
 
-| PC | Program | Why |
-|---|---|---|
-| both | `MiniUsbBridge.exe` | this app (GUI + encrypted tunnel) |
-| **Server** | [usbipd-win](https://github.com/dorssel/usbipd-win/releases) (`winget install usbipd`) | exports the USB device |
-| **Client** | [usbip-win2](https://github.com/vadimgrn/usbip-win2/releases) | installs the signed UDE virtual USB host controller driver |
+Just run the single offline installer on **both PCs**: `MiniUsbBridge-1.0.0-setup.exe`
 
-The installer's *USB-over-IP backends* page detects both and links to the official releases. The app's
-start screen also shows their status (a red banner appears if one is missing).
+The installer **already contains the required backends** (official vendor releases, unmodified):
+
+| PC | Backend bundled in the installer | Why |
+|---|---|---|
+| **Server** | [usbipd-win](https://github.com/dorssel/usbipd-win/releases) (GPL-3.0) | exports the USB device (`winget install usbipd` is the manual equivalent) |
+| **Client** | [usbip-win2](https://github.com/vadimgrn/usbip-win2/releases) (BSD-2-Clause) | installs the signed UDE virtual USB host controller driver |
+
+During setup choose **Server / Client / Both** - the needed backend is installed automatically.
+Already installed backends are left alone. Provenance (version, SHA-256) is in `{app}\docs\BUNDLED.md`.
+
+The installer's *USB-over-IP backends* page still shows the status (a red banner appears only if a
+backend is missing **and** not bundled, which only happens with dev builds). The app's start screen
+also shows the status.
 
 usbip-win2 notes: it restarts USB 3.0 hubs during installation (close file transfers/calls first) and
 may require a reboot. Without that driver the remote device can never appear in Device Manager — the

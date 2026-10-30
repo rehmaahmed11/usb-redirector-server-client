@@ -45,14 +45,15 @@ geometry and copy match the real owner-drawn Win32 UI.)*
 
 Every merge to `main` and every pull request builds the app, runs the tests and compiles the
 Inno Setup installer on a real Windows runner. The run publishes the exe, the relay, the
-`MiniUsbBridge-1.0.0-setup.exe`, and a **tool chain report** (per-stage commands, exit codes,
+**fully offline** `MiniUsbBridge-1.0.0-setup.exe` (backends already inside), and a **tool chain report** (per-stage commands, exit codes,
 durations, tool versions, failing-log excerpt, artifact SHA-256) as artifacts, in the run summary
 and as a PR comment. See [`ci/README.md`](ci/README.md).
 
 ```
 Linux job    core tests -> relay build -> relay protocol tests -> installer-source lint
-Windows job  cmake configure -> MSVC build -> test_core.exe -> dist\app -> ISCC -> setup.exe
-             ->verify + SHA-256 -> tool chain report (artifact + run summary + PR comment)
+             -> backend fetch dry-run -> docs link check
+Windows job  cmake configure -> MSVC build -> test_core.exe -> dist\app -> fetch backends (offline bundle)
+             -> ISCC -> setup.exe -> verify + SHA-256 -> tool chain report
 ```
 
 ---
@@ -214,7 +215,15 @@ the installer).
 
 ```powershell
 .\build.ps1                # configure + build + run tests + collect dist\app
-.\build.ps1 -Installer     # also produce dist\MiniUsbBridge-1.0.0-setup.exe
+.\build.ps1 -Installer     # also produce dist\MiniUsbBridge-1.0.0-setup.exe (fully offline, backends bundled)
+```
+
+Offline bundle (the installer already contains the official backends):
+
+```powershell
+# CI does this automatically; run it locally to get the same offline installer
+pwsh -File ci/fetch-backends.ps1   # or: python3 ci/fetch-backends.py
+iscc installer/MiniUsbBridge.iss
 ```
 
 Manual equivalent:
@@ -223,6 +232,7 @@ Manual equivalent:
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build\Release\test_core.exe
+pwsh -File ci/fetch-backends.ps1
 iscc installer\MiniUsbBridge.iss
 ```
 
@@ -246,18 +256,22 @@ docs/                      QUICKSTART, NETWORKING, TROUBLESHOOTING, ARCHITECTURE
                            SECURITY, RELAY, TESTING
 ```
 
-## Backends, licenses and what is *not* bundled
+## Backends, licenses and what *is* bundled
 
 * [usbipd-win](https://github.com/dorssel/usbipd-win) — **GPL-3.0**, server side. Started as a separate
-  process (`usbipd.exe`); no code is linked into this app.
+  process (`usbipd.exe`); no code is linked into this app. The **official MSI** is bundled into
+  `MiniUsbBridge-*-setup.exe` by CI (`ci/fetch-backends.py` → `installer/backends/`) and installed
+  automatically when you choose Server/Both.
 * [usbip-win2](https://github.com/vadimgrn/usbip-win2) — **BSD-2-Clause**, client side (UDE driver).
+  The **official EXE** is bundled the same way and installed automatically for Client/Both.
 * Rejected after inspection: [ren2r/usbip-win](https://github.com/ren2r/usbip-win) (unmaintained since
   2021, no Windows 10 driver story) and [ameggs/OpenUSBIP](https://github.com/ameggs/OpenUSBIP)
   (userland Python, no kernel driver ⇒ the device can never appear in Device Manager).
 
-This application is MIT licensed (see `LICENSE`) and does not redistribute the backend binaries; the
-installer links to the official releases and can optionally install copies you place in
-`installer/backends/`.
+This application is MIT licensed (see `LICENSE`). The bundled backend binaries are the **unmodified**
+vendor releases, redistributed under their own licenses (GPL-3.0 and BSD-2-Clause). Provenance for
+the bundled versions (URL, SHA-256, license) is recorded in `installer/backends/BUNDLED.md` and
+copied to `{app}\docs\` at install time; the GPL-3.0 source is available from the vendor repo above.
 
 ## Limitations you should know
 
