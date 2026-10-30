@@ -9,11 +9,13 @@ push to main / pull request / manual
         |
         +-- core (ubuntu-latest)     ci/linux-check.sh
         |     g++ core tests -> test_core -> g++ relay -> relay protocol tests
-        |     -> check_iss_sources.py -> docs link check
+        |     -> check_iss_sources.py -> fetch-backends dry-run -> docs link check
         |
         +-- windows (windows-latest)  ci/windows-build.ps1
               cmake configure -> MSVC build -> test_core.exe -> dist\app
-              -> check_iss_sources.py -> ISCC.exe -> verify + SHA-256
+              -> fetch backends (usbipd-win + usbip-win2, offline bundle)
+              -> check_iss_sources.py -> ISCC.exe -> setup.exe (fully offline)
+              -> verify + SHA-256
 ```
 
 ## The tool chain report
@@ -47,13 +49,14 @@ when a stage throws. It is published three ways:
 | `ci/windows-build.ps1` | the whole Windows pipeline, timed and self-reporting; also usable locally: `pwsh -File ci\windows-build.ps1` |
 | `ci/linux-check.sh` | portable core + relay + installer-source checks on any POSIX host |
 | `ci/check_iss_sources.py` | pre-flight of the Inno Setup script: every `[Files]`/`LicenseFile`/`SetupIconFile` source must exist (resolves `#define` references, honours `skipifsourcedoesntexist`, `--allow` for not-yet-built binaries) |
+| `ci/fetch-backends.py` / `ps1` | downloads the official backend installers into `installer/backends/` so the setup is fully offline (run automatically in CI, or manually: `python3 ci/fetch-backends.py`) |
 | `ci/publish-report.ps1` | posts the report to the PR / a check run; never fails the job |
 
 ## Downloading a build
 
 Actions → the run → **Artifacts**:
 
-* `MiniUsbBridge-windows-x64` — the exe, the relay, `MiniUsbBridge-1.0.0-setup.exe` and `SHA256SUMS.txt`;
+* `MiniUsbBridge-windows-x64` — the exe, the relay, **fully offline** `MiniUsbBridge-1.0.0-setup.exe` (backends already inside) and `SHA256SUMS.txt`;
 * `toolchain-report-windows` / `toolchain-report-linux` — reports and per-stage logs.
 
 The binaries are **unsigned**, so SmartScreen warns on first run. Signing needs a

@@ -20,3 +20,5 @@ installer/output/
 # bundled vendor installers (large, licensing: keep them out of git)
 installer/backends/*.msi
 installer/backends/*.exe
+installer/backends/BUNDLED.md
+installer/backends/versions.json

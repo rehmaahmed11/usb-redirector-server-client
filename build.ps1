@@ -73,6 +73,24 @@ $size = [math]::Round((Get-Item "$appDir\MiniUsbBridge.exe").Length / 1MB, 2)
 Write-Host "Built: $appDir\MiniUsbBridge.exe ($size MB)" -ForegroundColor Green
 
 if ($Installer) {
+    # Fetch bundled backends so the installer is fully offline (no download at install time)
+    $fetchPs1 = "$root\\ci\\fetch-backends.ps1"
+    if (Test-Path $fetchPs1) {
+        Write-Host "Fetching bundled backends (offline installer)..." -ForegroundColor Cyan
+        try {
+            & pwsh -NoProfile -File $fetchPs1
+            if ($LASTEXITCODE -ne 0) { Write-Host "Backend fetch returned $LASTEXITCODE - installer will still build but may show download links" -ForegroundColor Yellow }
+        } catch {
+            Write-Host "Backend fetch failed: $($_.Exception.Message) - installer will still build" -ForegroundColor Yellow
+        }
+    } else {
+        $fetchPy = "$root\\ci\\fetch-backends.py"
+        if (Test-Path $fetchPy) {
+            Write-Host "Fetching bundled backends via python..." -ForegroundColor Cyan
+            try { & python $fetchPy } catch { Write-Host "Python fetch failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+    }
+
     $iscc = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
@@ -90,6 +108,6 @@ if ($Installer) {
 
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Install the server backend on the PC with the USB device : winget install usbipd"
-Write-Host "  2. Install the client backend on the PC that needs it       : https://github.com/vadimgrn/usbip-win2/releases"
-Write-Host "  3. Run dist\app\MiniUsbBridge.exe  (or the setup.exe with -Installer)"
+Write-Host "  Installer is fully offline: backends are already inside (no extra download needed)"
+Write-Host "  1. Run dist\MiniUsbBridge-*-setup.exe on both PCs (choose Server / Client / Both)"
+Write-Host "  2. Or run dist\app\MiniUsbBridge.exe directly"
