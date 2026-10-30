@@ -86,6 +86,62 @@ Details, screenshots-in-words and the MediaTek notes: [`docs/QUICKSTART.md`](doc
 * The UI tells you which path is in use: *Direct* or *Relay*. It never pretends a relayed session is
   direct. UDP hole punching / STUN / ICE is **not** implemented.
 
+### How the two PCs actually find each other (different networks)
+
+The pairing code carries four things the client needs: the **session id**, the **128-bit secret**, the
+**10-byte certificate pin**, and — if the server knows one — a **reachable `host:port`**. Everything else
+is discovered at connect time.
+
+```
+ Server PC (e.g. home NAT)                        Client PC (e.g. office NAT)
+ ┌──────────────────────────┐                    ┌──────────────────────────┐
+ │ listens 0.0.0.0:4437     │                    │ outbound only            │
+ │ session id + secret ─────┼── pairing code ───►│ 1. try host:4437 (direct)│
+ │                          │   (copy/paste)     │ 2. else join relay       │
+ └───────────┬──────────────┘                    └────────────┬─────────────┘
+             │ outbound join (from RelayLoop, retried)       │ outbound join
+             └──────────────►  relay:4443  ◄─────────────────┘
+                        TLS 1.2/1.3 end‑to‑end through the relay
+```
+
+**Path A — direct.** The server listens on all interfaces at `serverPort` (default 4437) and puts
+`publicHost` (Settings) — or, if that is blank, its own LAN IPv4 — into the code. This path works when:
+
+* both PCs are on the same LAN (the LAN address in the code is enough), or
+* the router forwards TCP 4437 to the server PC *and* you set `publicHost` to your public IP or DDNS
+  name, or
+* the two PCs are already on a private mesh — WireGuard, Tailscale, ZeroTier, Radmin VPN — and
+  `publicHost` is the mesh address (this is the easiest way to get a direct path across the internet,
+  and the highest throughput).
+
+**Path B — relay.** Nothing to forward, no public address needed. Both sides make *outbound* connections
+to `relayHost:relayPort` (default 4443):
+
+1. The server's relay loop joins as role **2** with `HMAC(secret, "MUB1-RELAY"‖sessionId)[0..16]` and
+   waits for a match. If the join fails it retries every 10 s; if nobody arrives it rejoins.
+2. The client, after the direct attempt fails, joins as role **1** with the same tag.
+3. The relay pairs them (a second socket claiming the same role is rejected) and then only splices bytes.
+   A third party cannot join: it would need the 128-bit secret to compute the tag.
+4. Immediately after pairing the ordinary **TLS handshake** runs end to end between the two PCs, with
+   the certificate pinned to the hash from the code — so the relay, or anyone on the path, cannot read or
+   forge traffic even though it forwards the bytes.
+5. Approval, device list and every later USB/IP data channel use the same mechanism: each data channel is
+   a fresh relay join by both sides (the server loops back and joins again), so a stalled device cannot
+   block the control channel.
+
+| Situation | What you do | Path the UI shows |
+|---|---|---|
+| Same LAN | nothing | `Direct` |
+| Different networks, router port can be opened | forward TCP 4437, set `publicHost` | `Direct` |
+| Different networks, VPN/mesh already present | set `publicHost` to the mesh IP | `Direct` |
+| Different networks, no port forwarding possible | run `mubb-relay` on a small VPS, set relay host/port on **both** PCs, tick the relay checkbox on both | `Relay (encrypted)` |
+| Neither of the above | the client reports exactly why ("no route, enable the relay or forward port 4437") | — |
+
+Not implemented, and not pretended otherwise: **UPnP/NAT-PMP port mapping, STUN, ICE and UDP hole
+punching.** Those need either router cooperation or a rendezvous service, and a half-working version
+would just look like a flaky product. The relay is the supported answer for hostile NATs; it costs
+bandwidth on the VPS, so prefer a direct/VPN path for USB 3 mass storage.
+
 ## Security model (short version)
 
 * 128-bit random pairing secret + random 64-bit session id, encoded as `MUB1-…` (Crockford base32).

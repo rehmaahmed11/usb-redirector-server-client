@@ -87,6 +87,18 @@ falls back to the relay automatically, and the UI shows *Relay (encrypted)* for 
 Mode of operation: the client joins with its session id; the server keeps a waiting join for its current
 pairing code. When the code is regenerated, a new relay session id is used.
 
+**One relay join per connection, not per session.** The server sits in a loop: join as role 2, wait, get
+paired, hand the socket to the normal connection handler, then join again. The control channel takes the
+first pair; every USB/IP data channel the client opens (one per attached device, created by the client's
+127.0.0.1 tunnel) takes the next. That is why a wedged data channel never blocks the control channel —
+but it also means the relay sees one pairing per attached device, and the server must stay in the loop
+for as long as a client may attach something.
+
+Because the relay asks both sides to prove knowledge of the pairing secret before it splices anything, a
+client that only knows the *session id* (which is 64-bit and visible to the relay operator) still cannot
+join. The TLS handshake that follows is what actually protects the data, and it is pinned to the
+certificate hash inside the pairing code.
+
 ## Sizing
 
 Splicing costs ~2 copies per direction; a small VPS (1 vCPU, 512 MB) handles a USB 2.0 full-speed device
