@@ -75,37 +75,38 @@ jobs:
       - name: Build the Vista-target binary (static CRT) and its installer
         # Proves the -MinWin path works: _WIN32_WINNT=0x0600, static runtime,
         # MiniUsbBridgeLegacy.iss (Windows 7 SP1+), PE import check.
-        # The output is captured so a failure can be published as a PR comment
-        # (the Actions log viewer is not always reachable).
+        # The output is captured and published as a PR comment, because the
+        # Actions log viewer is not always reachable for whoever reads the run.
         run: |
           New-Item -ItemType Directory -Force dist/ci | Out-Null
           $log = "dist/ci/legacy-build.log"
-          & ./build.ps1 -MinWin vista -Installer *>&1 | Tee-Object -FilePath $log
-          $code = $LASTEXITCODE
-          $tail = @(Get-Content $log -Tail 120 -ErrorAction SilentlyContinue)
-          $report = @(
+          $exit = 0
+          try {
+            & pwsh -NoProfile -File ./build.ps1 -MinWin vista -Installer *>&1 |
+              Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne $null) { $exit = $LASTEXITCODE }
+          } catch {
+            $_ | Out-String | Add-Content -Path $log
+            $exit = 1
+          }
+          $tail = @(Get-Content $log -Tail 150 -ErrorAction SilentlyContinue)
+          $result = if ($exit -eq 0) { "**PASS**" } else { "**FAIL** (exit $exit)" }
+          @(
             "# Legacy build report (Vista target)",
             "",
             "| | |",
             "|---|---|",
-            "| Result | $(if ($code -eq 0) { '**PASS**' } else { "**FAIL** (exit $code)" }) |",
-            "| Command | ``./build.ps1 -MinWin vista -Installer`` |",
+            "| Result | $result |",
+            "| Command | ``pwsh -File ./build.ps1 -MinWin vista -Installer`` |",
             "| Target | ``_WIN32_WINNT=0x0600``, static CRT, x64 |",
             "",
-            "## Last 120 lines",
+            "## Last 150 lines",
             "",
-            "``````",
+            '```',
             ($tail -join "`n"),
-            "``````"
-          )
-          $report | Set-Content dist/ci/toolchain-report-legacy.md
-          if ($code -ne 0) { exit $code }
-
-      - name: Publish legacy build report
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-legacy -->" -Title "Legacy build report (Vista target, static CRT)"
+            '```'
+          ) | Set-Content dist/ci/toolchain-report-legacy.md
+          if ($exit -ne 0) { exit $exit }
 
       - name: Upload legacy artifacts
         if: always()
