@@ -8,6 +8,7 @@
 
 #include "../src/core/base32.h"
 #include "../src/core/bytes.h"
+#include "../src/core/os_support.h"
 #include "../src/core/pairing.h"
 #include "../src/core/protocol.h"
 #include "../src/core/sha256.h"
@@ -486,6 +487,157 @@ static void TestSplitHostPort() {
     CHECK(port == 25565);
 }
 
+static void TestOsSupport() {
+    std::printf("OS support model (XP ... Windows 11)\n");
+    {
+        OsProfile p = ClassifyOs(OsVersion{5, 1, 2600}, "x86");
+        CHECK(p.os == WinOs::WinXp);
+        CHECK_EQ_STR(WinOsCode(p.os), "xp");
+        CHECK_EQ_STR(WinOsName(p.os), "Windows XP");
+        CHECK(p.IsLegacy());
+        CHECK(p.Is32Bit());
+    }
+    {
+        OsProfile p = ClassifyOs(OsVersion{5, 2, 3790}, "x64");
+        CHECK(p.os == WinOs::WinXp64);
+        CHECK(p.serverSku);  // XP x64 == Server 2003 kernel
+    }
+    {
+        OsProfile p = ClassifyOs(OsVersion{6, 1, 7601}, "x64");
+        CHECK(p.os == WinOs::Win7);
+        CHECK_EQ_STR(WinOsCode(p.os), "win7");
+        CHECK(DescribeOs(p).find("Windows 7") != std::string::npos);
+        CHECK(DescribeOs(p).find("7601") != std::string::npos);
+        CHECK(DescribeOs(p).find("x64") != std::string::npos);
+    }
+    CHECK(ClassifyOs(OsVersion{6, 0, 6002}, "x64").os == WinOs::Vista);
+    CHECK(ClassifyOs(OsVersion{6, 2, 9200}, "x64").os == WinOs::Win8);
+    CHECK(ClassifyOs(OsVersion{6, 3, 9600}, "x64").os == WinOs::Win81);
+    CHECK(ClassifyOs(OsVersion{10, 0, 10240}, "x64").os == WinOs::Win10);
+    CHECK(ClassifyOs(OsVersion{10, 0, 17763}, "x64").os == WinOs::Win10);
+    CHECK(ClassifyOs(OsVersion{10, 0, 19045}, "x64").os == WinOs::Win10);
+    CHECK(ClassifyOs(OsVersion{10, 0, 22000}, "x64").os == WinOs::Win11);
+    CHECK(ClassifyOs(OsVersion{10, 0, 26100}, "x64").os == WinOs::Win11);
+    CHECK_EQ_STR(WinOsCode(WinOs::Win11), "win11");
+    CHECK(ClassifyOs(OsVersion{4, 0, 950}, "x86").os == WinOs::Unknown);
+
+    // Version comparison used for backend minimums.
+    CHECK(VersionAtLeast(OsVersion{10, 0, 17763}, 10, 17763));
+    CHECK(!VersionAtLeast(OsVersion{10, 0, 17134}, 10, 17763));
+    CHECK(VersionAtLeast(OsVersion{10, 0, 26100}, 10, 18362));
+    CHECK(!VersionAtLeast(OsVersion{6, 3, 9600}, 10, 17763));
+    CHECK(ArchHasVendorBackend("x64"));
+    CHECK(ArchHasVendorBackend("arm64"));
+    CHECK(!ArchHasVendorBackend("x86"));
+
+    // --- capability matrix -------------------------------------------------
+    {
+        OsProfile p = ClassifyOs(OsVersion{5, 1, 2600}, "x86");
+        OsCapabilities c = CapabilitiesFor(p, true);
+        CHECK(c.gui);
+        CHECK(c.tunnel);
+        CHECK(!c.serverBackend);
+        CHECK(!c.clientBackend);
+        CHECK(c.legacyDriverPath);
+        CHECK(!c.limitation.empty());
+        TlsProfile t = TlsProfileFor(p, true);
+        CHECK(t.offered == TlsProfile::kTls10);
+        CHECK(!t.useSystemDefault);  // XP is told explicitly what to use
+        CHECK(!t.strongCrypto);
+        CHECK(t.sha1Certificate);
+        CHECK_EQ_STR(t.description, "TLS 1.0 (legacy SChannel, SHA-1 certificates)");
+    }
+    {   // Windows 7: app yes, no vendor backend at all.
+        OsProfile p = ClassifyOs(OsVersion{6, 1, 7601}, "x64");
+        OsCapabilities c = CapabilitiesFor(p, true);
+        CHECK(c.gui && c.tunnel);
+        CHECK(!c.serverBackend && !c.clientBackend);
+        CHECK(c.serverNote.find("Windows 10 1809") != std::string::npos);
+        CHECK(c.clientNote.find("1903") != std::string::npos);
+        CHECK(c.limitation.find("legacy") != std::string::npos);
+        TlsProfile t = TlsProfileFor(p, true);
+        CHECK((t.offered & TlsProfile::kTls12) != 0);
+        CHECK((t.offered & TlsProfile::kTls10) != 0);
+        CHECK(t.strongCrypto);
+        CHECK(!t.sha1Certificate);
+        CHECK(t.useSystemDefault);  // Vista+ keeps the administrator's policy
+    }
+    {   // Windows 10 1803: too old for both backends.
+        OsCapabilities c = CapabilitiesFor(ClassifyOs(OsVersion{10, 0, 17134}, "x64"), true);
+        CHECK(!c.serverBackend);
+        CHECK(!c.clientBackend);
+        CHECK(!c.limitation.empty());
+    }
+    {   // Windows 10 1809: server ok, client driver still needs 1903.
+        OsCapabilities c = CapabilitiesFor(ClassifyOs(OsVersion{10, 0, 17763}, "x64"), true);
+        CHECK(c.serverBackend);
+        CHECK(!c.clientBackend);
+        CHECK(c.limitation.find("CLIENT") != std::string::npos);
+    }
+    {   // Windows 10 1903 and later: everything works.
+        for (int build : {18362, 19045, 26100}) {
+            OsCapabilities c = CapabilitiesFor(ClassifyOs(OsVersion{10, 0, build}, "x64"), true);
+            CHECK(c.serverBackend);
+            CHECK(c.clientBackend);
+            CHECK(c.limitation.empty());
+            CHECK(!c.legacyDriverPath);
+        }
+    }
+    {   // 32-bit Windows 10: no vendor backend ships an x86 build.
+        OsCapabilities c = CapabilitiesFor(ClassifyOs(OsVersion{10, 0, 19045}, "x86"), true);
+        CHECK(!c.serverBackend);
+        CHECK(!c.clientBackend);
+        CHECK(c.clientNote.find("32-bit") != std::string::npos);
+    }
+    {   // Windows 11 ARM64 is explicitly supported by both vendors.
+        OsCapabilities c = CapabilitiesFor(ClassifyOs(OsVersion{10, 0, 26100}, "arm64"), true);
+        CHECK(c.serverBackend && c.clientBackend);
+        CHECK(c.limitation.empty());
+    }
+    {   // Hardened TLS setting: no TLS 1.0/1.1 on a modern OS.
+        OsProfile p = ClassifyOs(OsVersion{10, 0, 19045}, "x64");
+        TlsProfile t = TlsProfileFor(p, false);
+        CHECK(t.offered == TlsProfile::kTls12);
+        CHECK(!t.useSystemDefault);  // hardened setting pins TLS 1.2
+        CHECK(t.description.find("disabled by setting") != std::string::npos);
+        TlsProfile old = TlsProfileFor(ClassifyOs(OsVersion{5, 1, 2600}, "x86"), false);
+        CHECK(old.offered == TlsProfile::kTls10);  // cannot drop the only protocol
+        CHECK(old.description.find("WARNING") != std::string::npos);
+    }
+    {   // Unknown version: conservative, no false "supported" claims.
+        OsProfile p = ClassifyOs(OsVersion{0, 0, 0}, "x86");
+        OsCapabilities c = CapabilitiesFor(p, true);
+        CHECK(!c.gui);
+        CHECK(!c.serverBackend && !c.clientBackend);
+        CHECK(!c.limitation.empty());
+    }
+
+    // --- published matrix + diagnostics ------------------------------------
+    {
+        std::string md = CompatibilityMatrixMarkdown();
+        CHECK(md.find("| Windows version |") != std::string::npos);
+        CHECK(md.find("Windows XP SP3") != std::string::npos);
+        CHECK(md.find("Windows 7 SP1") != std::string::npos);
+        CHECK(md.find("Windows 10 1809") != std::string::npos);
+        CHECK(md.find("Windows 11 21H2") != std::string::npos);
+        CHECK(md.find("Windows Server 2019") != std::string::npos);
+        CHECK(md.find("**no**") != std::string::npos);
+
+        OsProfile p = ClassifyOs(OsVersion{6, 1, 7601}, "x64");
+        auto lines = StartupDiagnostics(p, CapabilitiesFor(p, true), true);
+        CHECK(lines.size() >= 5);
+        CHECK(lines[0].find("Windows 7") != std::string::npos);
+        CHECK(lines[1].find("TLS") != std::string::npos);
+        CHECK(lines[2].find("NOT supported") != std::string::npos);
+        CHECK(lines[4].find("Limitation") != std::string::npos);
+
+        CHECK_EQ_STR(RequireOsMessage("usbipd-win", 10, 17763),
+                     "usbipd-win needs Windows 10 1809 (build 17763) or later");
+        CHECK_EQ_STR(RequireOsMessage("usbip-win2", 10, 18362),
+                     "usbip-win2 needs Windows 10 1903 (build 18362) or later");
+    }
+}
+
 int main() {
     std::printf("Mini USB Bridge core tests\n==========================\n");
     TestSha256();
@@ -498,6 +650,7 @@ int main() {
     TestPairingDecisions();
     TestUsbipWire();
     TestSplitHostPort();
+    TestOsSupport();
     std::printf("==========================\n%d checks, %d failure(s)\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

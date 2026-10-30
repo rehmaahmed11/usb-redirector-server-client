@@ -15,6 +15,7 @@
 #include "../core/logger.h"
 #include "../core/settings.h"
 #include "../core/strings.h"
+#include "../win/wincompat.h"
 #include "../server/server_mode.h"
 #include "../win/elevated.h"
 #include "../win/process.h"
@@ -41,6 +42,7 @@ constexpr int kIdCancel = 221;
 constexpr int kIdLogs = 222;
 constexpr int kIdFirewall = 223;
 constexpr int kIdCheckAutoShare = 224;
+constexpr int kIdCheckLegacyTls = 231;
 constexpr int kIdEditLogLevel = 225;
 
 struct SettingsCtx {
@@ -158,6 +160,7 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 s.autoDetachOnExit = IsChecked(hwnd, kIdCheckDetach);
                 s.verifyAttachWithSetupApi = IsChecked(hwnd, kIdCheckVerify);
                 s.autoShareAll = IsChecked(hwnd, kIdCheckAutoShare);
+                s.allowLegacyTls = IsChecked(hwnd, kIdCheckLegacyTls);
                 s.logLevel = std::atoi(GetText(GetDlgItem(hwnd, kIdEditLogLevel)).c_str());
                 if (s.serverPort < 1024) s.serverPort = 4437;
                 if (s.relayPort == 0) s.relayPort = 4443;
@@ -169,6 +172,7 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     return 0;
                 }
                 Logger::Instance().SetMinLevel(static_cast<LogLevel>(s.logLevel));
+                RefreshOsSupport();  // the TLS policy follows allowLegacyTls
                 ctx->saved = true;
                 DestroyWindow(hwnd);
                 return 0;
@@ -208,7 +212,7 @@ bool ShowSettings(HWND parent) {
     ctx.font = reinterpret_cast<HFONT>(SendMessageW(parent, WM_GETFONT, 0, 0));
     if (!ctx.font) ctx.font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
 
-    int w = 620, h = 640;
+    int w = 620, h = 790;
     RECT prc{};
     GetWindowRect(parent, &prc);
     int x = prc.left + ((prc.right - prc.left) - w) / 2;
@@ -269,6 +273,24 @@ bool ShowSettings(HWND parent) {
     row += step;
     AddLabel(&ctx, L"Log level (0-3)", left, row + 3, 180);
     AddEdit(&ctx, kIdEditLogLevel, std::to_string(s.logLevel), fieldX, row, 60);
+    row += 30;
+
+    // Read-only compatibility verdict for *this* PC (see docs/COMPATIBILITY.md).
+    AddLabel(&ctx, L"Compatibility", left, row, 460);
+    row += 22;
+    AddLabel(&ctx, W("This PC: " + OsInfo().description).c_str(), left, row, 580);
+    row += 20;
+    AddLabel(&ctx, W("TLS: " + OsCaps().tlsNote).c_str(), left, row, 580);
+    row += 20;
+    AddLabel(&ctx,
+             W(std::string("Server backend (usbipd-win): ") + (OsCaps().serverBackend ? "usable" : "not usable") +
+               "    Client backend (usbip-win2): " + (OsCaps().clientBackend ? "usable" : "not usable"))
+                 .c_str(),
+             left, row, 580);
+    row += 24;
+    AddCheck(&ctx, kIdCheckLegacyTls, L"Accept TLS 1.0/1.1 for old Windows peers (XP/Vista)", s.allowLegacyTls, left,
+             row, 560);
+    row += 24;
 
     AddButton(&ctx, kIdLogs, L"Open log folder", left, h - 92, 130, 28);
     AddButton(&ctx, kIdCancel, L"Cancel", w - 210, h - 92, 90, 28);

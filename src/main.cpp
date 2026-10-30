@@ -21,27 +21,9 @@
 #include "win/net.h"
 #include "win/process.h"
 #include "win/tls.h"
+#include "win/wincompat.h"
 
 namespace {
-
-void EnableDpiAwareness() {
-    // Per-monitor v2 when available; fall back gracefully on Windows 10 < 1703.
-    HMODULE user32 = GetModuleHandleW(L"user32.dll");
-    if (user32) {
-        using SetCtxFn = BOOL(WINAPI*)(HANDLE);
-        auto setCtx = reinterpret_cast<SetCtxFn>(
-            GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
-        if (setCtx) {
-            if (setCtx(reinterpret_cast<HANDLE>(-4))) return;
-        }
-        using SetAwarenessFn = BOOL(WINAPI*)(int);
-        auto setAwareness = reinterpret_cast<SetAwarenessFn>(GetProcAddress(user32, "SetProcessDpiAwareness"));
-        if (setAwareness) {
-            if (SUCCEEDED(static_cast<HRESULT>(setAwareness(2)))) return;
-        }
-    }
-    SetProcessDPIAware();
-}
 
 // One instance per user session: the server binds a port and owns the identity
 // file, so a second copy would only confuse the user.
@@ -83,7 +65,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         return mub::RunElevatedOperation(args);
     }
 
-    EnableDpiAwareness();
+    // Per-monitor v2 -> per-monitor -> system aware, whichever this Windows has
+    // (Windows XP and Vista fall back to the GDI resolution).
+    mub::MubEnableDpiAwareness();
     InitCommonControls();
 
     HWND existing = nullptr;
@@ -100,6 +84,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
     mub::Logger::Instance().SetLogFile(logPath);
     mub::Logger::Instance().SetMinLevel(static_cast<mub::LogLevel>(settings.logLevel));
     mub::LogI("app", "Mini USB Bridge starting (log: " + logPath + ")");
+
+    // Detect the Windows version once: it decides the TLS policy and whether the
+    // USB backends can run here at all (see src/core/os_support.cpp).
+    mub::InitOsSupport();
 
     if (!mub::NetInit()) {
         MessageBoxW(nullptr, L"Winsock could not be initialized.", L"Mini USB Bridge", MB_OK | MB_ICONERROR);
@@ -127,6 +115,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
     if (!haveIdentity) {
         auto ev = mub::MakeUiEvent(mub::UiKind::Banner,
                                    "Secure identity could not be created: " + identityError, "error");
+        mub::PostUi(std::move(ev));
+    } else if (!mub::OsCaps().limitation.empty()) {
+        // Say it once, plainly: this Windows version cannot run the USB backends.
+        auto ev = mub::MakeUiEvent(mub::UiKind::Banner, mub::OsCaps().limitation, "warn");
         mub::PostUi(std::move(ev));
     }
 

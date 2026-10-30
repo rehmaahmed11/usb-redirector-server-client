@@ -4,21 +4,19 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
 #endif
 
 #include <cstring>
 
 #include "../core/protocol.h"  // Hex()
+#include "wincompat.h"
 
 namespace mub {
 
 bool RandomBytes(void* out, size_t len) {
 #if defined(_WIN32)
-    if (len == 0) return true;
-    return BCryptGenRandom(nullptr, static_cast<PUCHAR>(out), static_cast<ULONG>(len),
-                           BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+    // BCryptGenRandom on Vista+, CryptGenRandom on Windows XP/2000.
+    return MubRandomBytes(out, len);
 #else
     (void)out;
     (void)len;

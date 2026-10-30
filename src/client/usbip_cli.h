@@ -17,6 +17,8 @@ struct UsbipClientInfo {
     std::string version;
     bool supportsTcpPort = false;  // global --tcp-port option available
     bool driverPresent = false;    // UDE driver node exists
+    bool osSupported = true;       // usbip-win2 can load its UDE driver on this Windows version
+    bool legacyDriver = false;     // a legacy (pre-0.9.x) usbip-win VHCI driver is installed
     std::string detail;
 };
 

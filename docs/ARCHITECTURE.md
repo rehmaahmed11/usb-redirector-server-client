@@ -34,7 +34,15 @@ Four candidate projects were inspected (upstream READMEs, CLI parsers, protocol 
 
 1. **`usbipd bind` takes the device away from the local host.** While a device is bound, the Windows machine that physically owns it loses access to it. The app binds only on explicit user action and unbinds on "Stop sharing"/disconnect.
 2. **Re-enumeration destroys the session.** If a device re-enumerates (unplug, or a phone switching to Preloader/BROM), the old instance disappears: the ACL/session ends, the client's virtual device detaches. Our app detects this (`WM_DEVICECHANGE`) and offers *manual* re-attach. It never auto-restarts anything.
-3. **usbipd-win cannot export a device that never stays present.** MediaTek Preloader/BROM windows can be shorter than a WAN round trip (see §7).
+3. **Windows versions: one shim, one matrix.** Every API that does not exist on Windows XP lives in
+   `src/win/wincompat.cpp` (resolved with `GetProcAddress`, with an XP fallback) and every
+   "can this PC do it?" decision lives in `src/core/os_support.cpp` (unit tested, and the source of both
+   the UI text and `docs/COMPATIBILITY.md`). `ci/check_legacy_compat.py` fails the build when a newer API
+   is used anywhere else, and `ci/xp-compile-check.sh` compiles the whole tree with
+   `_WIN32_WINNT=0x0501`. The TLS policy (which protocols to offer, whether a new identity is SHA-1
+   signed) is derived from the same OS profile, so an XP server and a Windows 11 client interop without
+   special cases.
+4. **usbipd-win cannot export a device that never stays present.** MediaTek Preloader/BROM windows can be shorter than a WAN round trip (see §7).
 4. **Client needs Windows 10 1903+ and a driver install** (with a USB 3.0 hub restart during installation). No way around that — it is a kernel driver.
 5. **USB/IP is TCP-only**, no encryption and no authentication. This is the core reason for this project: we never expose 3240. See §4.
 

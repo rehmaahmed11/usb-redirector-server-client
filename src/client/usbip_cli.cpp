@@ -6,10 +6,12 @@
 #include <thread>
 
 #include "../core/logger.h"
+#include "../core/os_support.h"
 #include "../core/settings.h"
 #include "../core/strings.h"
 #include "../server/usb_detect.h"
 #include "../win/process.h"
+#include "../win/wincompat.h"
 
 namespace mub {
 namespace {
@@ -39,6 +41,20 @@ int ExtractPortNumber(const std::string& text) {
     // Fall back: any standalone number in the last part of the message.
     int v = scan(0);
     return v > 0 ? v : -1;
+}
+
+// A legacy usbip-win (cezanne/ren2r line, e.g. v0.1.0) installs a WDM VHCI
+// driver instead of the modern UDE driver. It still speaks USB/IP 1.1.1, so it
+// can be used, but it is not signed for modern Windows and its CLI differs.
+bool LegacyVhciPresent() {
+    const char* files[] = {
+        "C:\\Windows\\System32\\drivers\\usbip_vhci.sys",
+        "C:\\Windows\\System32\\drivers\\usbip_vhci_ude.sys",
+    };
+    for (const char* f : files) {
+        if (FileExists(f)) return true;
+    }
+    return false;
 }
 
 bool IsElevationError(const std::string& text) {
@@ -86,9 +102,17 @@ UsbipClientInfo UsbipCli::Probe(bool forceRefresh) {
     UsbipClientInfo info;
     info.path = ResolvePath();
     info.installed = !info.path.empty();
+    info.osSupported = OsCaps().clientBackend;
     probedAt_ = now;
     if (!info.installed) {
-        info.detail = "usbip.exe was not found. Install usbip-win2 (client driver) to attach remote devices.";
+        info.legacyDriver = LegacyVhciPresent();
+        if (!info.osSupported && info.legacyDriver) {
+            info.detail = "No usbip.exe found, but a legacy VHCI driver is installed. " + OsCaps().clientNote;
+        } else if (!info.osSupported) {
+            info.detail = OsCaps().clientNote;
+        } else {
+            info.detail = "usbip.exe was not found. Install usbip-win2 (client driver) to attach remote devices.";
+        }
         cached_ = info;
         return info;
     }
@@ -100,13 +124,22 @@ UsbipClientInfo UsbipCli::Probe(bool forceRefresh) {
     std::string helpText = Lower(help.out + help.err);
     info.supportsTcpPort = helpText.find("tcp-port") != std::string::npos;
 
-    // The UDE device node is created by the driver installer.
-    info.driverPresent = DirExists("C:\\Program Files\\USBip");
-    if (info.supportsTcpPort) {
-        info.detail = "usbip.exe " + info.version + " (custom TCP port supported)";
-    } else {
+    // The driver node is created by the installer; the file check catches
+    // legacy installs that place the driver elsewhere.
+    info.legacyDriver = LegacyVhciPresent() && !DirExists("C:\\Program Files\\USBip");
+    info.driverPresent = DirExists("C:\\Program Files\\USBip") || LegacyVhciPresent();
+    if (!info.osSupported) {
+        info.detail = info.driverPresent
+                          ? "usbip.exe " + info.version + " found, but this Windows version cannot load the usbip-win2 UDE driver: " +
+                                OsCaps().clientNote
+                          : OsCaps().clientNote;
+    } else if (!info.supportsTcpPort) {
         info.detail = "usbip.exe " + info.version +
                       " (older build: the tunnel must use TCP port 3240)";
+    } else if (info.legacyDriver) {
+        info.detail = "usbip.exe " + info.version + " with a legacy WDM VHCI driver (test-signed, unsupported)";
+    } else {
+        info.detail = "usbip.exe " + info.version + " (custom TCP port supported)";
     }
     cached_ = info;
     return info;
@@ -125,12 +158,33 @@ UsbipCli::AttachResult UsbipCli::Attach(const std::string& host, uint16_t tcpPor
         return result;
     }
 
+    if (!info.osSupported && !info.legacyDriver) {
+        // Refuse to pretend: without a driver this Windows can load, the attach
+        // cannot produce a device in Device Manager.
+        result.message = info.detail;
+        LogW("usbip", "attach refused on unsupported Windows version: " + info.detail);
+        return result;
+    }
+    if (info.legacyDriver) {
+        LogW("usbip", "legacy VHCI driver in use - attach is best effort and unsupported");
+    }
+
     std::string cmd = "\"" + info.path + "\"";
     if (info.supportsTcpPort) cmd += " --tcp-port " + std::to_string(tcpPort);
     cmd += " attach -r " + host + " -b " + busid;
 
     ProcessResult res = RunProcess(Widen(cmd), timeoutMs);
     std::string text = Trim(res.Combined());
+    // Old builds reject the global --tcp-port option; retry the plain form (the
+    // tunnel is bound to 3240 in that case, see ClientMode).
+    if (res.launched && res.exitCode != 0 && info.supportsTcpPort &&
+        (Lower(text).find("unknown option") != std::string::npos ||
+         Lower(text).find("invalid option") != std::string::npos)) {
+        std::string fallback = "\"" + info.path + "\" attach -r " + host + " -b " + busid;
+        LogW("usbip", "--tcp-port rejected by usbip.exe, retrying with the legacy syntax");
+        res = RunProcess(Widen(fallback), timeoutMs);
+        text = Trim(res.Combined());
+    }
     result.message = text;
     if (!res.launched) {
         result.message = res.error;

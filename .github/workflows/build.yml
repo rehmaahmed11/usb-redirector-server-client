@@ -34,7 +34,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Portable core, relay and installer-source checks
+      - name: Install the MinGW-w64 cross compiler (Windows XP target compile check)
+        # ci/xp-compile-check.sh compiles every source with -D_WIN32_WINNT=0x0501,
+        # where the headers hide post-XP APIs. It skips cleanly without a compiler.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-i686
+
+      - name: Portable core, relay, XP-compatibility and installer-source checks
         run: bash ci/linux-check.sh
 
       - name: Upload tool chain report (Linux)
@@ -51,6 +56,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-linux -->" -Title "Tool chain report - Linux (core, relay, installer sources)"
+
+  windows-legacy:
+    name: Legacy Windows build (Vista - 11) + installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the Vista-target binary (static CRT) and its installer
+        # Proves the -MinWin path works without the Visual Studio 2022-only
+        # toolchain assumptions: _WIN32_WINNT=0x0600, static runtime,
+        # MiniUsbBridgeLegacy.iss (Windows 7 SP1+), PE import check.
+        run: ./build.ps1 -MinWin vista -Installer
+
+      - name: Upload legacy artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiniUsbBridge-windows-legacy
+          path: |
+            dist/app-legacy/MiniUsbBridge.exe
+            dist/app-legacy/mubb-relay.exe
+            dist/MiniUsbBridge-*-legacy-setup.exe
+          if-no-files-found: warn
+          retention-days: 30
 
   windows:
     name: Windows build + installer
@@ -87,6 +121,24 @@ jobs:
         # The script writes dist/ci/toolchain-report.md from a finally block, so
         # the report exists even when a stage fails.
         run: ./ci/windows-build.ps1
+
+      - name: Legacy Windows import report (informational)
+        # Proves our own code does not statically import APIs that older Windows
+        # (XP/Vista/7/8/8.1) do not have - wincompat.cpp must resolve them at
+        # runtime. Not blocking: with the Windows 10 CRT some of these names come
+        # from the runtime DLLs, not from this program.
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force dist/ci | Out-Null
+          if (Test-Path dist/app/MiniUsbBridge.exe) {
+            python ci/check_legacy_compat.py --exe dist/app/MiniUsbBridge.exe --target win10 |
+              Tee-Object -FilePath dist/ci/legacy-imports.txt
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "informational: see dist/ci/legacy-imports.txt (post-XP imports above)" -ForegroundColor Yellow
+            }
+          } else {
+            "no binary to check" | Set-Content dist/ci/legacy-imports.txt
+          }
 
       - name: Upload tool chain report (Windows)
         if: always()

@@ -1,6 +1,6 @@
 # CI
 
-Two jobs, one goal: prove that every merge still produces a working
+Three jobs, one goal: prove that every merge still produces a working
 `MiniUsbBridge.exe`, `mubb-relay.exe` and a compiling Inno Setup installer — and
 leave behind a report that explains what happened, even when it failed.
 
@@ -9,7 +9,13 @@ push to main / pull request / manual
         |
         +-- core (ubuntu-latest)     ci/linux-check.sh
         |     g++ core tests -> test_core -> g++ relay -> relay protocol tests
-        |     -> check_iss_sources.py -> fetch-backends dry-run -> docs link check
+        |     -> check_legacy_compat.py (+ --self-test)  [XP/7/8/10/11 API lint]
+        |     -> xp-compile-check.sh (_WIN32_WINNT=0x0501 build, MinGW-w64 i686)
+        |     -> check_iss_sources.py x3 -> fetch-backends dry-run -> compat docs -> docs link check
+        |
+        +-- windows-legacy (windows-latest)  .\build.ps1 -MinWin vista -Installer
+        |     _WIN32_WINNT=0x0600 + static CRT -> dist\app-legacy
+        |     -> check_legacy_compat.py --exe (PE imports) -> MiniUsbBridgeLegacy.iss
         |
         +-- windows (windows-latest)  ci/windows-build.ps1
               cmake configure -> MSVC build -> test_core.exe -> dist\app
@@ -17,6 +23,21 @@ push to main / pull request / manual
               -> check_iss_sources.py -> ISCC.exe -> setup.exe (fully offline)
               -> verify + SHA-256
 ```
+
+## Compatibility checks (Windows XP ... Windows 11)
+
+Three checks make sure a merge cannot silently raise the minimum Windows version;
+all of them are in the Linux job, so they run in seconds and need no Windows:
+
+| Check | What it proves |
+|---|---|
+| `ci/check_legacy_compat.py` | no post-XP API is called outside `src/win/wincompat.cpp` (46 APIs, 4 static libraries), plus `--self-test` which proves the lint fails on a violation |
+| `ci/xp-compile-check.sh` | every source compiles with `-D_WIN32_WINNT=0x0501` (MinGW-w64 i686), where the headers hide post-XP declarations; skips cleanly without a cross compiler |
+| `ci/check_legacy_compat.py --exe ... --target xp` | a built XP binary uses PE subsystem 5.01, no UCRT import, no post-XP import (used by `build.ps1 -MinWin xp`, informational for the Vista target) |
+
+`docs/COMPATIBILITY.md` is the human-readable version of the same rules, and the
+per-OS verdicts come from `src/core/os_support.cpp`, which is unit tested (362
+checks in `tools/test_core.sh`).
 
 ## The tool chain report
 

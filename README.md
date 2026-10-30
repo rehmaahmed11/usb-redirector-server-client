@@ -2,9 +2,20 @@
 
 [![build](https://github.com/rehmaahmed11/usb-redirector-server-client/actions/workflows/build.yml/badge.svg)](https://github.com/rehmaahmed11/usb-redirector-server-client/actions/workflows/build.yml)
 
-Native Windows 10/11 app (C++17, Win32, ~1 MB) that shares the USB devices of one PC with another PC
-over the internet, so the remote device shows up in **Device Manager** and works with normal Windows
-software (for example SP Flash Tool).
+Native Windows app (C++17, Win32, ~1 MB) that shares the USB devices of one PC with another PC over the
+internet, so the remote device shows up in **Device Manager** and works with normal Windows software
+(for example SP Flash Tool).
+
+The app itself runs on **Windows XP SP3, Vista, 7, 8, 8.1, 10 (every build) and 11** (x86, x64 and ARM64).
+USB redirection needs a backend, and the two backends have their own minimums — the app detects the
+Windows version at start and tells you the truth instead of failing mysteriously. See
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the full matrix:
+
+| Piece | Minimum Windows |
+|---|---|
+| App, pairing, encrypted tunnel, relay | **Windows XP SP3** |
+| SERVER backend (`usbipd-win`) | Windows 10 1809 x64/ARM64 |
+| CLIENT backend (`usbip-win2` driver) | Windows 10 1903 x64 / Windows 11 ARM64 |
 
 * **SERVER** mode — on the PC where the USB device is plugged in.
 * **CLIENT** mode — on the PC that needs the device.
@@ -50,10 +61,14 @@ durations, tool versions, failing-log excerpt, artifact SHA-256) as artifacts, i
 and as a PR comment. See [`ci/README.md`](ci/README.md).
 
 ```
-Linux job    core tests -> relay build -> relay protocol tests -> installer-source lint
-             -> backend fetch dry-run -> docs link check
-Windows job  cmake configure -> MSVC build -> test_core.exe -> dist\app -> fetch backends (offline bundle)
-             -> ISCC -> setup.exe -> verify + SHA-256 -> tool chain report
+Linux job     core tests -> relay build -> relay protocol tests
+              -> legacy Windows lint (XP..11 API surface, with self-test)
+              -> XP-target compile of every source (_WIN32_WINNT=0x0501, MinGW-w64 i686)
+              -> installer-source lint (3 installers) -> backend fetch dry-run -> docs link check
+Legacy job    .\build.ps1 -MinWin vista -Installer
+              -> _WIN32_WINNT=0x0600 + static CRT -> PE import check -> legacy setup.exe
+Windows job   cmake configure -> MSVC build -> test_core.exe -> dist\app -> fetch backends (offline bundle)
+              -> ISCC -> setup.exe -> verify + SHA-256 -> legacy import report -> tool chain report
 ```
 
 ---
@@ -63,13 +78,16 @@ Windows job  cmake configure -> MSVC build -> test_core.exe -> dist\app -> fetch
 | Area | Status |
 |---|---|
 | Native Win32 GUI (choose SERVER/CLIENT, server & client screens, settings, approval dialog) | implemented, compiles clean with MSVC-style `/W4` semantics and cross-compiles with MinGW |
-| Portable core: SHA-256/HMAC, Crockford pairing codes, protocol framing, pairing decision matrix, USB/IP header inspection | **248 automated checks pass** (`tools/test_core.sh`) |
+| Portable core: SHA-256/HMAC, Crockford pairing codes, protocol framing, pairing decision matrix, USB/IP header inspection, Windows XP→11 support matrix | **362 automated checks pass** (`tools/test_core.sh`) |
+| Old-Windows compatibility: one runtime shim for every post-XP API, XP-target compile of all sources, PE import lint | enforced on every PR (`ci/check_legacy_compat.py`, `ci/xp-compile-check.sh`) |
 | Relay: pairing, byte splicing, auth-tag enforcement, duplicate-role refusal | **10 automated protocol checks pass** (`tests/test_relay.py`) |
 | TLS 1.2/1.3 with certificate pinning (SChannel), DPAPI-protected server identity | implemented; requires Windows to exercise |
 | USB enumeration (SetupAPI), device add/remove, busid/sharing state via `usbipd state` | implemented; requires Windows + usbipd-win |
 | USB/IP export/import through `usbipd.exe` / `usbip.exe` | implemented; **needs a real USB device to confirm** |
 | Installer (Inno Setup 6, multi-page, backend detection, firewall, uninstall) | script complete; build on Windows with Inno Setup |
+| Legacy installers: Windows 7 SP1+ (`MiniUsbBridgeLegacy.iss`) and Windows XP (`MiniUsbBridgeXp.iss`, Inno Setup 5.6.1) | scripts complete; not built in CI |
 | Real hardware validation (two PCs, two networks, MediaTek Preloader/BROM) | **not yet done — see `docs/TESTING.md`** |
+| Windows XP/Vista/7/8/8.1 execution | compiles against the XP API surface and is linted in CI; **no hardware validation yet — see `docs/COMPATIBILITY.md`** |
 
 > Honest status: nothing in this repository claims that USB redirection has already been tested on
 > physical hardware. The code paths that decide "attached successfully" are deliberately strict, and
@@ -210,12 +228,18 @@ device list open on both sides, and prefer devices that stay enumerated (ADB/fas
 
 ## Build
 
-Requirements: Windows 10/11, CMake ≥ 3.20, Visual Studio 2019/2022 (Desktop C++), Inno Setup 6 (only for
-the installer).
+Requirements: CMake ≥ 3.20, Visual Studio 2019/2022 (Desktop C++), Inno Setup 6 (only for the installer).
+For a binary that also runs on older Windows: `-MinWin vista` (Vista..11) or `-MinWin xp`
+(Windows XP SP3+, needs the Visual Studio *"C++ Windows XP Support (v141)"* toolset, which VS 2022 does
+not ship) — see [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
 ```powershell
-.\build.ps1                # configure + build + run tests + collect dist\app
-.\build.ps1 -Installer     # also produce dist\MiniUsbBridge-1.0.0-setup.exe (fully offline, backends bundled)
+.\build.ps1                       # configure + build + run tests + collect dist\app        (Windows 10/11)
+.\build.ps1 -Installer            # also produce dist\MiniUsbBridge-1.0.0-setup.exe (fully offline, backends bundled)
+.\build.ps1 -MinWin vista         # binary for Vista/7/8/8.1/10/11 -> dist\app-legacy
+.\build.ps1 -MinWin vista -Installer   # dist\MiniUsbBridge-1.0.0-legacy-setup.exe (no bundled drivers)
+.\build.ps1 -MinWin xp            # Windows XP SP3 build (v141_xp toolset) -> dist\app-legacy
+.\build.ps1 -MinWin xp -Installer # Windows XP setup (needs Inno Setup 5.6.1)
 ```
 
 Offline bundle (the installer already contains the official backends):
@@ -238,13 +262,23 @@ iscc installer\MiniUsbBridge.iss
 
 Portable tests (Linux/macOS, no Windows needed): `./tools/test_core.sh`
 
+Compatibility checks (also Linux, no Windows needed):
+
+```bash
+python3 ci/check_legacy_compat.py --self-test   # the lint really catches post-XP APIs
+bash   ci/xp-compile-check.sh                   # compile everything with _WIN32_WINNT=0x0501 (MinGW)
+python3 ci/check_legacy_compat.py --exe dist/app/MiniUsbBridge.exe --target xp   # PE import check
+```
+
 ## Project layout
 
 ```
 src/main.cpp               entry point, single-instance, --mode server|client, elevated helper dispatch
 src/core/                  portable, unit-tested: sha256/hmac, base32, pairing, protocol, session_auth,
-                           usbip_wire (USB/IP header inspection), logger, settings, strings
-src/win/                   net (Winsock), tls (SChannel + pinning), crypto (BCrypt), process, elevated
+                           usbip_wire (USB/IP header inspection), os_support (XP..11 matrix, TLS policy),
+                           logger, settings, strings
+src/win/                   net (Winsock), tls (SChannel + pinning), crypto, process, elevated,
+                           wincompat (the only place that may use post-XP APIs; XP fallbacks)
 src/net/channel.cpp        framed TLS control channel, byte pump, relay connector
 src/server/                usb_detect (SetupAPI), usbipd_cli, server_mode (pairing, approval, tunnel)
 src/client/                usbip_cli, client_mode (loopback tunnel, attach verification)
@@ -252,8 +286,8 @@ src/ui/                    main_window (owner-drawn Win32), settings_dialog + ap
 relay/relay.cpp            self-hostable relay (Windows and Linux)
 installer/                 Inno Setup script
 tests/                     core unit tests + relay protocol tests
-docs/                      QUICKSTART, NETWORKING, TROUBLESHOOTING, ARCHITECTURE,
-                           SECURITY, RELAY, TESTING
+docs/                      QUICKSTART, COMPATIBILITY (XP..11), NETWORKING, TROUBLESHOOTING,
+                           ARCHITECTURE, SECURITY, RELAY, TESTING
 ```
 
 ## Backends, licenses and what *is* bundled
@@ -276,7 +310,9 @@ copied to `{app}\docs\` at install time; the GPL-3.0 source is available from th
 ## Limitations you should know
 
 1. A device that is shared through usbipd-win **cannot be used by the server PC itself** while shared.
-2. The client needs the usbip-win2 kernel driver (Windows 10 1903+), which is a separate install.
+2. The client needs the usbip-win2 kernel driver (Windows 10 1903+), which is a separate install — and it
+   does not exist for XP/Vista/7/8/8.1/32-bit Windows, so on those the app runs but cannot redirect USB
+   (see [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)).
 3. A device that resets/re-enumerates always costs a re-attach; there is no transparent failover.
 4. Some devices (keyboards/mice, some phones in specific modes) are refused or unstable over USB/IP;
    those are backend properties, not something this app hides.

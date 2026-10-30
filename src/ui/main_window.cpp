@@ -26,6 +26,7 @@
 #include "../server/usbipd_cli.h"
 #include "../win/elevated.h"
 #include "../win/process.h"
+#include "../win/wincompat.h"
 #include "../win/tls.h"
 #include "settings_dialog.h"
 
@@ -123,7 +124,7 @@ LRESULT CALLBACK MainWindow::WndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARA
 LRESULT MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE: {
-            dpi_ = GetDpiForWindow(hwnd);
+            dpi_ = MubGetDpiForWindow(hwnd);
             fontBase_ = CreateFontW(-MulDiv(10, dpi_, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH,
                                     L"Segoe UI");
@@ -320,17 +321,27 @@ void MainWindow::BackendCheck() {
     std::thread([this]() {
         auto usbipd = UsbipdCli::Instance().Probe(true);
         auto usbip = UsbipCli::Instance().Probe(true);
-        bool serverOk = usbipd.installed;
-        bool clientOk = usbip.installed && usbip.driverPresent;
-        std::string serverText = serverOk ? ("usbipd-win found: " + usbipd.version)
-                                          : "usbipd-win missing - needed to share devices (Server mode)";
+        bool serverOk = usbipd.installed && usbipd.osSupported;
+        bool clientOk = usbip.installed && usbip.driverPresent && usbip.osSupported;
+        std::string serverText;
+        if (!usbipd.osSupported) {
+            serverText = "usbipd-win not usable on " + OsInfo().description;
+        } else if (!usbipd.installed) {
+            serverText = "usbipd-win missing - needed to share devices (Server mode)";
+        } else {
+            serverText = "usbipd-win found: " + usbipd.version;
+        }
         std::string clientText;
-        if (!usbip.installed)
+        if (!usbip.osSupported) {
+            clientText = usbip.installed ? ("usbip.exe found, driver not loadable on " + OsInfo().description)
+                                         : "no client driver can run on " + OsInfo().description;
+        } else if (!usbip.installed) {
             clientText = "usbip-win2 missing - needed to attach devices (Client mode)";
-        else if (!usbip.driverPresent)
+        } else if (!usbip.driverPresent) {
             clientText = "usbip.exe found, but the usbip-win2 driver is not installed";
-        else
+        } else {
             clientText = "usbip-win2 found: " + usbip.version;
+        }
         {
             std::lock_guard<std::mutex> lock(mu_);
             backendServerOk_ = serverOk;
@@ -339,9 +350,14 @@ void MainWindow::BackendCheck() {
             backendClientText_ = clientText;
         }
         if (!serverOk || !clientOk) {
-            SetBanner(serverOk ? "Client backend incomplete: install usbip-win2 for Client mode."
-                               : "Server backend missing: install usbipd-win for Server mode.",
-                      "warn");
+            // Prefer the precise OS limitation over the generic "install it" hint.
+            if (!OsCaps().limitation.empty()) {
+                SetBanner(OsCaps().limitation, "warn");
+            } else {
+                SetBanner(serverOk ? "Client backend incomplete: install usbip-win2 for Client mode."
+                                   : "Server backend missing: install usbipd-win for Server mode.",
+                          "warn");
+            }
         }
         PostMessageW(hwnd_, kUiEventMessage, 0, 0);
         InvalidateRect(hwnd_, nullptr, FALSE);

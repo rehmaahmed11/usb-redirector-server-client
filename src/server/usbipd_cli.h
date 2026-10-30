@@ -18,6 +18,7 @@ struct UsbipdInfo {
     std::string version;
     bool serviceRunning = false;
     bool loopbackReachable = false;  // 127.0.0.1:3240 accepts connections
+    bool osSupported = true;         // usbipd-win can run on this Windows version at all
     std::string detail;
 };
 

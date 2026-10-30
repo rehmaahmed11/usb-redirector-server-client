@@ -10,7 +10,7 @@ CXX=${CXX:-g++}
 echo "== core tests ($($CXX --version | head -1))"
 $CXX -std=c++17 -O2 -Wall -Wextra -Isrc \
     tests/test_core.cpp \
-    src/core/base32.cpp src/core/logger.cpp src/core/pairing.cpp src/core/protocol.cpp \
+    src/core/base32.cpp src/core/logger.cpp src/core/os_support.cpp src/core/pairing.cpp src/core/protocol.cpp \
     src/core/session_auth.cpp src/core/settings.cpp src/core/sha256.cpp src/core/strings.cpp \
     src/core/usbip_wire.cpp \
     -o /tmp/mub_test_core

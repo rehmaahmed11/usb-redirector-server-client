@@ -714,6 +714,14 @@ bool ClientMode::DetachDevice(const DeviceEntry& device, std::string& message) {
 void ClientMode::StartTunnel() {
     if (tunnelListener_ != INVALID_SOCKET) return;
     std::string err;
+    // Old usbip.exe builds (legacy usbip-win, Windows XP..8.1) have no
+    // --tcp-port switch: they always talk to 127.0.0.1:3240, so the tunnel has
+    // to live there when that backend is in use.
+    UsbipClientInfo client = UsbipCli::Instance().Probe();
+    if (client.installed && !client.supportsTcpPort && tunnelPort_ != 3240) {
+        LogW("client", "backend does not support --tcp-port; moving the tunnel to 3240");
+        tunnelPort_ = 3240;
+    }
     SOCKET s = TcpListen(tunnelPort_, true, &err);
     if (s == INVALID_SOCKET) {
         // Fall back to the USB/IP default port so old usbip.exe builds still work.

@@ -4,8 +4,8 @@
 
 #if defined(_WIN32)
 
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>  // tcp_keepalive / SIO_KEEPALIVE_VALS: MSVC needs this header explicitly
 
@@ -13,20 +13,26 @@
 #include <mutex>
 
 #include "../core/logger.h"
+#include "wincompat.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 namespace mub {
 namespace {
-std::once_flag g_wsaOnce;
+// std::mutex instead of std::call_once: call_once imports InitOnceExecuteOnce,
+// which Windows XP does not have.
+std::mutex g_wsaMutex;
 int g_wsaResult = -1;
-}
+bool g_wsaDone = false;
+}  // namespace
 
 bool NetInit() {
-    std::call_once(g_wsaOnce, []() {
+    std::lock_guard<std::mutex> lock(g_wsaMutex);
+    if (!g_wsaDone) {
         WSADATA wsa;
         g_wsaResult = WSAStartup(MAKEWORD(2, 2), &wsa);
-    });
+        g_wsaDone = true;
+    }
     return g_wsaResult == 0;
 }
 
@@ -125,7 +131,7 @@ SOCKET TcpAccept(SOCKET listener, std::string* peerAddress, int timeoutMs) {
     SOCKET s = accept(listener, reinterpret_cast<sockaddr*>(&addr), &len);
     if (s != INVALID_SOCKET && peerAddress) {
         char buf[64] = {};
-        inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf));
+        MubInetNtop(AF_INET, &addr.sin_addr, buf, sizeof(buf));
         *peerAddress = buf;
     }
     return s;
@@ -207,7 +213,7 @@ std::string PeerAddress(SOCKET s) {
     int len = sizeof(addr);
     if (getpeername(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return {};
     char buf[64] = {};
-    inet_ntop(AF_INET, &addr.sin_addr, buf, sizeof(buf));
+    MubInetNtop(AF_INET, &addr.sin_addr, buf, sizeof(buf));
     return buf;
 }
 
@@ -235,14 +241,14 @@ std::string LocalIPv4() {
     sockaddr_in dst{};
     dst.sin_family = AF_INET;
     dst.sin_port = htons(53);
-    inet_pton(AF_INET, "1.1.1.1", &dst.sin_addr);
+    MubInetPton(AF_INET, "1.1.1.1", &dst.sin_addr);
     std::string result;
     if (connect(s, reinterpret_cast<sockaddr*>(&dst), sizeof(dst)) == 0) {
         sockaddr_in src{};
         int len = sizeof(src);
         if (getsockname(s, reinterpret_cast<sockaddr*>(&src), &len) == 0) {
             char buf[64] = {};
-            inet_ntop(AF_INET, &src.sin_addr, buf, sizeof(buf));
+            MubInetNtop(AF_INET, &src.sin_addr, buf, sizeof(buf));
             result = buf;
         }
     }
