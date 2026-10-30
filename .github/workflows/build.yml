@@ -120,6 +120,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Publish legacy build report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoProfile -File ci/publish-report.ps1 -Marker "<!-- mub-ci-report-legacy -->" -Title "Legacy build report (Vista target, static CRT)"
+
   windows:
     name: Windows build + installer
     runs-on: windows-latest
