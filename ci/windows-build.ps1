@@ -213,7 +213,10 @@ function Collect-ToolVersions {
     try {
         $isccEarly = Find-Iscc
         if ($isccEarly) {
-            Add-Tool "Inno Setup (ISCC)" "$((Get-Item $isccEarly).VersionInfo.FileVersion) - $isccEarly"
+            $v = (Get-Item $isccEarly).VersionInfo
+            $ver = $v.ProductVersion
+            if (-not $ver) { $ver = $v.FileVersion }
+            Add-Tool "Inno Setup (ISCC)" "$ver - $isccEarly"
         } else {
             Add-Tool "Inno Setup (ISCC)" "not installed yet (the installer stage installs it)"
         }

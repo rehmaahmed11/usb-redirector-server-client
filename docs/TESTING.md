@@ -9,7 +9,13 @@ executed and what still requires two Windows PCs and a real USB device.
 ./tools/test_core.sh
 ```
 
-### Core (`tests/test_core.cpp`) — 248 checks
+The same checks run in CI on every merge and pull request, together with the full MSVC build and
+the Inno Setup compile (`.github/workflows/build.yml`, described in `ci/README.md`). The CI run
+produces `MiniUsbBridge.exe`, `mubb-relay.exe` and `MiniUsbBridge-1.0.0-setup.exe`, plus a tool
+chain report. Green CI means *"it compiles, links, passes the portable tests and packages"* — it
+does **not** mean the USB redirection works; that is what section 4 is for.
+
+### Core (`tests/test_core.cpp`) — 267 checks
 
 | Area | What is proven |
 |---|---|

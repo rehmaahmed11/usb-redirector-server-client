@@ -1,5 +1,7 @@
 # Mini USB Bridge
 
+[![build](https://github.com/rehmaahmed11/usb-redirector-server-client/actions/workflows/build.yml/badge.svg)](https://github.com/rehmaahmed11/usb-redirector-server-client/actions/workflows/build.yml)
+
 Native Windows 10/11 app (C++17, Win32, ~1 MB) that shares the USB devices of one PC with another PC
 over the internet, so the remote device shows up in **Device Manager** and works with normal Windows
 software (for example SP Flash Tool).
@@ -36,6 +38,22 @@ USB/IP traffic **never leaves the machine unencrypted**: both ends connect to th
 
 *(Rendered from the same layout math as `src/ui/main_window.cpp` by `tools/preview_ui.py`, so the
 geometry and copy match the real owner-drawn Win32 UI.)*
+
+---
+
+## Builds (CI)
+
+Every merge to `main` and every pull request builds the app, runs the tests and compiles the
+Inno Setup installer on a real Windows runner. The run publishes the exe, the relay, the
+`MiniUsbBridge-1.0.0-setup.exe`, and a **tool chain report** (per-stage commands, exit codes,
+durations, tool versions, failing-log excerpt, artifact SHA-256) as artifacts, in the run summary
+and as a PR comment. See [`ci/README.md`](ci/README.md).
+
+```
+Linux job    core tests -> relay build -> relay protocol tests -> installer-source lint
+Windows job  cmake configure -> MSVC build -> test_core.exe -> dist\app -> ISCC -> setup.exe
+             ->verify + SHA-256 -> tool chain report (artifact + run summary + PR comment)
+```
 
 ---
 
